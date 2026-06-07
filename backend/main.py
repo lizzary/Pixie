@@ -477,6 +477,49 @@ def search_illustrations(
     return SearchResult(items=items, total=total, offset=offset, limit=limit)
 
 
+# ── Tags & Prompts ──────────────────────────────────────
+
+@app.get("/api/tags")
+def list_tags():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT tags FROM illustrations WHERE tags IS NOT NULL AND tags != ''"
+    ).fetchall()
+    conn.close()
+
+    unique = set()
+    for r in rows:
+        for t in r["tags"].split(","):
+            trimmed = t.strip()
+            if trimmed:
+                unique.add(trimmed)
+    return sorted(unique)
+
+
+@app.get("/api/prompts")
+def list_prompts():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT extended_data FROM illustrations WHERE extended_data IS NOT NULL"
+    ).fetchall()
+    conn.close()
+
+    unique = set()
+    for r in rows:
+        try:
+            data = json.loads(r["extended_data"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for key in ("Positive Prompt", "Negative Prompt"):
+            text = data.get(key, "")
+            if text:
+                for term in text.split(","):
+                    trimmed = term.strip()
+                    if trimmed:
+                        unique.add(trimmed)
+    return sorted(unique)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

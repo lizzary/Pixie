@@ -76,6 +76,16 @@ export function getIllustrationMetadata(illustrationId) {
   return request(`/api/illustrations/${illustrationId}/metadata`);
 }
 
+// ── Tags & Prompts ─────────────────────────────────────
+
+export function listTags() {
+  return request('/api/tags');
+}
+
+export function listPrompts() {
+  return request('/api/prompts');
+}
+
 // ── Search ─────────────────────────────────────────────
 
 export function searchIllustrations(query, offset = 0, limit = 100) {
