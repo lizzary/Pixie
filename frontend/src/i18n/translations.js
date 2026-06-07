@@ -209,6 +209,11 @@ const translations = {
     'groupConfig.otherDesc': '— unmatched illustrations',
     'groupConfig.cancel': 'Cancel',
     'groupConfig.save': 'Save',
+    'groupConfig.sets.switchHint': 'Switch between saved grouping configurations. Each set has its own independent groups.',
+    'groupConfig.sets.newSet': 'New Set',
+    'groupConfig.sets.deleteSet': 'Delete Set',
+    'groupConfig.sets.deleteConfirm': 'Delete set "{name}" and all its groups? This cannot be undone.',
+    'groupConfig.sets.namePlaceholder': 'Set name...',
 
     // TagPromptSuggest
     'tagPromptSuggest.tag': 'tag',
@@ -447,6 +452,11 @@ const translations = {
     'groupConfig.otherDesc': '— 未匹配的作品',
     'groupConfig.cancel': '取消',
     'groupConfig.save': '保存',
+    'groupConfig.sets.switchHint': '在不同分组配置之间切换。每组配置拥有独立的分组定义。',
+    'groupConfig.sets.newSet': '新建配置集',
+    'groupConfig.sets.deleteSet': '删除配置集',
+    'groupConfig.sets.deleteConfirm': '确定要删除配置集 "{name}" 及其所有分组吗？此操作不可撤销。',
+    'groupConfig.sets.namePlaceholder': '配置集名称...',
 
     // TagPromptSuggest
     'tagPromptSuggest.tag': '标签',

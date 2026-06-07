@@ -27,7 +27,10 @@ export default function SearchOverlay({ query, onClose }) {
   const [lastClickedId, setLastClickedId] = useState(null);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
-  const [groupBy, setGroupBy] = useState('none');
+  const [groupBy, setGroupBy] = useState(() => {
+    try { return localStorage.getItem('gallery-group-by') || 'none'; }
+    catch { return 'none'; }
+  });
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const [showGroupConfig, setShowGroupConfig] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
@@ -307,7 +310,7 @@ export default function SearchOverlay({ query, onClose }) {
                 label={t('searchOverlay.group.label')}
                 options={translatedGroupOptions}
                 value={groupBy}
-                onChange={(v) => { setGroupBy(v); setCollapsedGroups(new Set()); }}
+                onChange={(v) => { setGroupBy(v); try { localStorage.setItem('gallery-group-by', v); } catch {} setCollapsedGroups(new Set()); }}
                 rightElement={
                   groupBy !== 'none' ? (
                     <button
@@ -423,13 +426,7 @@ export default function SearchOverlay({ query, onClose }) {
         {showGroupConfig && (
           <GroupConfigModal
             type={groupBy}
-            pairs={activeConfig.pairs}
-            palette={activeConfig.palette}
-            otherColor={activeConfig.otherColor}
-            onSave={(pairs) => {
-              activeConfig.setPairs(pairs);
-              setShowGroupConfig(false);
-            }}
+            config={activeConfig}
             onClose={() => setShowGroupConfig(false)}
           />
         )}

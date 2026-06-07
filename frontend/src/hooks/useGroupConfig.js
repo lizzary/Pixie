@@ -15,25 +15,21 @@ const GROUP_COLORS = [
 
 const OTHER_COLOR = { bg: 'rgba(156, 163, 175, 0.06)', border: 'rgba(156, 163, 175, 0.25)' };
 
-function getStorageKey(type) {
-  return `gallery_group_${type}_config`;
+function getSetsKey(type) {
+  return `gallery_group_${type}_sets`;
 }
 
-function loadConfig(type) {
-  try {
-    const raw = localStorage.getItem(getStorageKey(type));
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore corrupt data */ }
-  return { pairs: [] };
+function getActiveKey(type) {
+  return `gallery_group_${type}_active`;
 }
 
-function saveConfig(type, config) {
-  localStorage.setItem(getStorageKey(type), JSON.stringify(config));
+let _nextId = 1;
+function genSetId() {
+  return `set_${Date.now()}_${_nextId++}`;
 }
 
-let nextId = 1;
-function genId() {
-  return `pair_${Date.now()}_${nextId++}`;
+function genPairId() {
+  return `pair_${Date.now()}_${_nextId++}`;
 }
 
 function assignColors(pairs) {
@@ -44,57 +40,128 @@ function assignColors(pairs) {
   }));
 }
 
+function migrateIfNeeded(type) {
+  const oldKey = `gallery_group_${type}_config`;
+  const newKey = getSetsKey(type);
+  if (localStorage.getItem(newKey)) return null;
+  try {
+    const raw = localStorage.getItem(oldKey);
+    if (raw) {
+      const data = JSON.parse(raw);
+      const defaultSet = {
+        id: genSetId(),
+        name: 'Default',
+        pairs: assignColors(data.pairs || []),
+      };
+      const sets = [defaultSet];
+      localStorage.setItem(newKey, JSON.stringify(sets));
+      localStorage.setItem(getActiveKey(type), defaultSet.id);
+      localStorage.removeItem(oldKey);
+      return { sets, activeId: defaultSet.id };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function loadState(type) {
+  const migrated = migrateIfNeeded(type);
+  if (migrated) return migrated;
+  try {
+    const raw = localStorage.getItem(getSetsKey(type));
+    if (raw) {
+      const sets = JSON.parse(raw).map((s) => ({ ...s, pairs: assignColors(s.pairs || []) }));
+      const activeId = (() => {
+        const id = localStorage.getItem(getActiveKey(type));
+        if (id && sets.some((s) => s.id === id)) return id;
+        return sets[0]?.id || null;
+      })();
+      return { sets, activeId };
+    }
+  } catch { /* ignore */ }
+  const defaultSet = { id: genSetId(), name: 'Default', pairs: [] };
+  localStorage.setItem(getSetsKey(type), JSON.stringify([defaultSet]));
+  localStorage.setItem(getActiveKey(type), defaultSet.id);
+  return { sets: [defaultSet], activeId: defaultSet.id };
+}
+
 export default function useGroupConfig(type) {
-  const [config, setConfig] = useState(() => loadConfig(type));
+  const [state, setState] = useState(() => loadState(type));
 
-  const persist = useCallback((newConfig) => {
-    setConfig(newConfig);
-    saveConfig(type, newConfig);
-  }, [type]);
+  const { sets, activeId } = state;
+  const activeSet = sets.find((s) => s.id === activeId) || sets[0];
 
-  const addPair = useCallback((keywords) => {
-    setConfig((prev) => {
-      const pairs = [...prev.pairs, { id: genId(), keywords }];
-      const updated = { ...prev, pairs: assignColors(pairs) };
-      saveConfig(type, updated);
-      return updated;
+  const switchSet = useCallback((id) => {
+    setState((prev) => {
+      if (prev.activeId === id) return prev;
+      saveActiveId(type, id);
+      return { ...prev, activeId: id };
     });
   }, [type]);
 
-  const removePair = useCallback((pairId) => {
-    setConfig((prev) => {
-      const pairs = prev.pairs.filter((p) => p.id !== pairId);
-      const updated = { ...prev, pairs: assignColors(pairs) };
-      saveConfig(type, updated);
-      return updated;
+  const addSet = useCallback((name) => {
+    setState((prev) => {
+      const newSet = {
+        id: genSetId(),
+        name: name || `Set ${prev.sets.length + 1}`,
+        pairs: [],
+      };
+      const updated = [...prev.sets, newSet];
+      saveSets(type, updated);
+      saveActiveId(type, newSet.id);
+      return { sets: updated, activeId: newSet.id };
     });
   }, [type]);
 
-  const updatePair = useCallback((pairId, keywords) => {
-    setConfig((prev) => {
-      const pairs = prev.pairs.map((p) =>
-        p.id === pairId ? { ...p, keywords } : p
-      );
-      const updated = { ...prev, pairs };
-      saveConfig(type, updated);
-      return updated;
+  const removeSet = useCallback((id) => {
+    setState((prev) => {
+      if (prev.sets.length <= 1) return prev;
+      const updated = prev.sets.filter((s) => s.id !== id);
+      const newActiveId = prev.activeId === id ? updated[0].id : prev.activeId;
+      saveSets(type, updated);
+      saveActiveId(type, newActiveId);
+      return { sets: updated, activeId: newActiveId };
+    });
+  }, [type]);
+
+  const renameSet = useCallback((id, name) => {
+    setState((prev) => {
+      const updated = prev.sets.map((s) => (s.id === id ? { ...s, name } : s));
+      saveSets(type, updated);
+      return { ...prev, sets: updated };
     });
   }, [type]);
 
   const setPairs = useCallback((pairs) => {
-    persist({ pairs: assignColors(pairs) });
-  }, [persist]);
-
-  // Ensure pairs have colors assigned (for loaded configs without colors)
-  const pairs = assignColors(config.pairs);
+    setState((prev) => {
+      const updated = prev.sets.map((s) =>
+        s.id === prev.activeId ? { ...s, pairs: assignColors(pairs) } : s
+      );
+      saveSets(type, updated);
+      return { ...prev, sets: updated };
+    });
+  }, [type]);
 
   return {
-    pairs,
-    addPair,
-    removePair,
-    updatePair,
+    sets,
+    activeSetId: activeId,
+    activeSet: activeSet || sets[0],
+    // Backward-compatible convenience accessors
+    pairs: activeSet?.pairs || [],
     setPairs,
     otherColor: OTHER_COLOR,
     palette: GROUP_COLORS,
+    // Set management
+    switchSet,
+    addSet,
+    removeSet,
+    renameSet,
   };
+}
+
+function saveSets(type, sets) {
+  localStorage.setItem(getSetsKey(type), JSON.stringify(sets));
+}
+
+function saveActiveId(type, id) {
+  localStorage.setItem(getActiveKey(type), id);
 }

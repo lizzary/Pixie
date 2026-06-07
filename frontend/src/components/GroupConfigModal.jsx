@@ -1,15 +1,65 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Trash2, Pencil } from 'lucide-react';
 import TagPromptSuggest from './TagPromptSuggest';
 import { useLocale } from '../contexts/LocaleContext';
 
-export default function GroupConfigModal({ type, pairs, palette, otherColor, onSave, onClose }) {
+export default function GroupConfigModal({ type, config, onClose }) {
   const { t } = useLocale();
+  const { sets, activeSetId, switchSet, addSet, removeSet, renameSet, setPairs, palette } = config;
 
-  // Local editing copy — changes not persisted until Save
-  const [editingPairs, setEditingPairs] = useState(() =>
-    pairs.map((p) => ({ ...p, keywords: [...p.keywords] }))
-  );
+  const activeSet = sets.find((s) => s.id === activeSetId) || sets[0];
+
+  // Local editing state — staged until Save
+  const [editingPairs, setEditingPairs] = useState([]);
+  const [editingName, setEditingName] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // set id pending deletion
+
+  // Sync local editing state whenever activeSetId or sets change
+  useEffect(() => {
+    const target = sets.find((s) => s.id === activeSetId);
+    if (target) {
+      setEditingPairs((target.pairs || []).map((p) => ({ ...p, keywords: [...p.keywords] })));
+      setEditingName(target.name || '');
+    }
+    setDeleteConfirm(null);
+  }, [activeSetId, sets]);
+
+  const handleSwitchSet = (setId) => {
+    // Save staged edits to current set before switching
+    const cleaned = editingPairs
+      .map((p) => ({ ...p, keywords: p.keywords.map((k) => k.trim()).filter(Boolean) }))
+      .filter((p) => p.keywords.length > 0);
+    setPairs(cleaned);
+    if (editingName.trim() && editingName.trim() !== activeSet?.name) {
+      renameSet(activeSetId, editingName.trim());
+    }
+    switchSet(setId);
+  };
+
+  const handleAddSet = () => {
+    // Save current first
+    const cleaned = editingPairs
+      .map((p) => ({ ...p, keywords: p.keywords.map((k) => k.trim()).filter(Boolean) }))
+      .filter((p) => p.keywords.length > 0);
+    setPairs(cleaned);
+    if (editingName.trim() && editingName.trim() !== activeSet?.name) {
+      renameSet(activeSetId, editingName.trim());
+    }
+    addSet(); // hook auto-switches to new set, useEffect syncs local state
+  };
+
+  const handleSave = () => {
+    const name = editingName.trim();
+    if (name && name !== activeSet?.name) {
+      renameSet(activeSetId, name);
+    }
+    const cleaned = editingPairs
+      .map((p) => ({ ...p, keywords: p.keywords.map((k) => k.trim()).filter(Boolean) }))
+      .filter((p) => p.keywords.length > 0);
+    setPairs(cleaned);
+    onClose();
+  };
 
   const handleKeywordChange = (pairId, index, value) => {
     setEditingPairs((prev) =>
@@ -55,14 +105,13 @@ export default function GroupConfigModal({ type, pairs, palette, otherColor, onS
     setEditingPairs((prev) => prev.filter((p) => p.id !== pairId));
   };
 
-  const handleSave = () => {
-    const cleaned = editingPairs
-      .map((p) => ({
-        ...p,
-        keywords: p.keywords.map((k) => k.trim()).filter(Boolean),
-      }))
-      .filter((p) => p.keywords.length > 0);
-    onSave(cleaned);
+  const handleDeleteSet = () => {
+    if (!deleteConfirm) {
+      setDeleteConfirm(activeSetId);
+      return;
+    }
+    removeSet(deleteConfirm);
+    setDeleteConfirm(null);
   };
 
   return (
@@ -77,7 +126,7 @@ export default function GroupConfigModal({ type, pairs, palette, otherColor, onS
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-surface-secondary border border-edge-primary rounded-2xl w-full max-w-lg mx-4 shadow-2xl overflow-hidden"
+        className="bg-surface-secondary border border-edge-primary rounded-2xl w-full max-w-xl mx-4 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -95,18 +144,82 @@ export default function GroupConfigModal({ type, pairs, palette, otherColor, onS
           </button>
         </div>
 
+        {/* Set tabs bar */}
+        <div className="px-6 pt-4">
+          <p className="text-[11px] text-content-muted mb-2.5">{t('groupConfig.sets.switchHint')}</p>
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
+            {sets.map((s) => {
+              const isActive = s.id === activeSetId;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => handleSwitchSet(s.id)}
+                  className={`relative shrink-0 px-3.5 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    isActive
+                      ? 'bg-accent text-white shadow-md shadow-accent/25'
+                      : 'bg-surface-tertiary text-content-secondary hover:text-content-primary hover:bg-edge-secondary border border-transparent hover:border-edge-primary'
+                  }`}
+                >
+                  {s.name || `Set ${sets.indexOf(s) + 1}`}
+                </button>
+              );
+            })}
+
+            {/* Add new set button */}
+            <button
+              onClick={handleAddSet}
+              className="shrink-0 p-2 rounded-xl bg-surface-tertiary border border-dashed border-edge-primary hover:border-accent/50 hover:bg-accent/5 text-content-muted hover:text-accent transition-all duration-200"
+              title={t('groupConfig.sets.newSet')}
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="mx-6 border-t border-edge-subtle/30" />
+
         {/* Body */}
-        <div className="px-6 py-4 max-h-[60vh] overflow-y-auto space-y-4">
+        <div className="px-6 py-4 max-h-[55vh] overflow-y-auto space-y-4">
+          {/* Set name editor + delete */}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 bg-surface-tertiary rounded-lg border border-edge-secondary focus-within:border-accent/50 focus-within:ring-1 focus-within:ring-accent/20 transition-all px-3 py-2">
+              <Pencil className="w-3.5 h-3.5 text-content-muted shrink-0" />
+              <input
+                type="text"
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                placeholder={t('groupConfig.sets.namePlaceholder')}
+                className="flex-1 bg-transparent text-sm text-content-primary placeholder-content-muted focus:outline-none"
+              />
+            </div>
+            {sets.length > 1 && (
+              <button
+                onClick={handleDeleteSet}
+                className={`shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 ${
+                  deleteConfirm === activeSetId
+                    ? 'bg-danger text-white shadow-md shadow-danger/20'
+                    : 'text-content-muted hover:text-danger hover:bg-danger/10'
+                }`}
+                title={t('groupConfig.sets.deleteSet')}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline ml-1.5">
+                  {deleteConfirm === activeSetId
+                    ? t('groupConfig.sets.deleteConfirm', { name: editingName || activeSet?.name || '' })
+                    : t('groupConfig.sets.deleteSet')}
+                </span>
+              </button>
+            )}
+          </div>
+
           <p className="text-xs text-content-muted leading-relaxed">
             {t('groupConfig.help.general')}
-            {type === 'prompt' && (
-              <> {t('groupConfig.help.prompt')}</>
-            )}
+            {type === 'prompt' && <> {t('groupConfig.help.prompt')}</>}
             {' '}{t('groupConfig.help.other')}
           </p>
 
           {editingPairs.length === 0 && (
-            <div className="text-center py-6 text-content-muted text-sm">
+            <div className="text-center py-8 text-content-muted text-sm">
               {t('groupConfig.empty')}
             </div>
           )}
@@ -191,11 +304,11 @@ export default function GroupConfigModal({ type, pairs, palette, otherColor, onS
           {/* Other group preview */}
           <div
             className="rounded-xl p-3 border flex items-center gap-3"
-            style={{ backgroundColor: otherColor.bg, borderColor: otherColor.border }}
+            style={{ backgroundColor: config.otherColor.bg, borderColor: config.otherColor.border }}
           >
             <span
               className="w-3 h-3 rounded-full shrink-0"
-              style={{ backgroundColor: otherColor.border }}
+              style={{ backgroundColor: config.otherColor.border }}
             />
             <span className="text-sm text-content-tertiary">{t('groupConfig.other')}</span>
             <span className="text-xs text-content-muted">{t('groupConfig.otherDesc')}</span>
