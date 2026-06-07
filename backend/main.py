@@ -328,10 +328,10 @@ def get_illustration(illustration_id: int):
 
 
 @app.get("/api/illustrations/{illustration_id}/file")
-def serve_illustration_file(illustration_id: int):
+def serve_illustration_file(illustration_id: int, download: bool = Query(False)):
     conn = get_db()
     row = conn.execute(
-        "SELECT filename, artist_id, mime_type FROM illustrations WHERE id = ?",
+        "SELECT filename, artist_id, mime_type, original_filename FROM illustrations WHERE id = ?",
         (illustration_id,),
     ).fetchone()
     conn.close()
@@ -341,7 +341,11 @@ def serve_illustration_file(illustration_id: int):
     filepath = os.path.join(UPLOADS_DIR, str(row["artist_id"]), "originals", row["filename"])
     if not os.path.isfile(filepath):
         raise HTTPException(404, "File not found on disk")
-    return FileResponse(filepath, media_type=row["mime_type"])
+
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{row["original_filename"]}"'
+    return FileResponse(filepath, media_type=row["mime_type"], headers=headers if headers else None)
 
 
 @app.get("/api/illustrations/{illustration_id}/thumbnail")

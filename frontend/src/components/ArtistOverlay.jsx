@@ -1,8 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listIllustrations, uploadIllustrations, updateArtist, deleteIllustration } from '../api';
+import { useToast } from './Toast';
 import ConfirmModal from './ConfirmModal';
 import Lightbox from './Lightbox';
+import IllustrationCard from './IllustrationCard';
+
+const SORT_OPTIONS = [
+  { value: '', label: 'Default Order' },
+  { value: 'resolution', label: 'Resolution' },
+  { value: 'fileSize', label: 'File Size' },
+  { value: 'dateCreated', label: 'Date Created' },
+];
 
 export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
   const [illustrations, setIllustrations] = useState([]);
@@ -11,8 +20,14 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
   const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [coverTarget, setCoverTarget] = useState(null);
-  const [lightboxIll, setLightboxIll] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [lastClickedId, setLastClickedId] = useState(null);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [sortBy, setSortBy] = useState('');
+  const [sortOrder, setSortOrder] = useState('desc');
   const fileInputRef = useRef(null);
+  const { addToast } = useToast();
 
   const fetchIllustrations = useCallback(async () => {
     try {
@@ -29,11 +44,39 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     fetchIllustrations();
   }, [fetchIllustrations]);
 
+  const sortedIllustrations = useMemo(() => {
+    if (!sortBy) return illustrations;
+    const sorted = [...illustrations].sort((a, b) => {
+      let valA, valB;
+      switch (sortBy) {
+        case 'resolution':
+          valA = (a.width || 0) * (a.height || 0);
+          valB = (b.width || 0) * (b.height || 0);
+          break;
+        case 'fileSize':
+          valA = a.file_size || 0;
+          valB = b.file_size || 0;
+          break;
+        case 'dateCreated':
+          valA = a.created_at || '';
+          valB = b.created_at || '';
+          break;
+        default:
+          return 0;
+      }
+      if (sortOrder === 'asc') return valA > valB ? 1 : valA < valB ? -1 : 0;
+      return valA < valB ? 1 : valA > valB ? -1 : 0;
+    });
+    return sorted;
+  }, [illustrations, sortBy, sortOrder]);
+
   const handleUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
     setUploading(true);
     setError('');
+    setSelectedIds(new Set());
+    setLastClickedId(null);
     try {
       await uploadIllustrations(artist.id, files);
       await fetchIllustrations();
@@ -51,9 +94,11 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     try {
       await updateArtist(artist.id, { cover_illustration_id: coverTarget.id });
       setCoverTarget(null);
+      addToast('Cover updated successfully', 'success');
       if (onArtistUpdated) onArtistUpdated();
     } catch (err) {
-      setError(err.message);
+      addToast(err.message || 'Failed to set cover', 'error');
+      setCoverTarget(null);
     }
   };
 
@@ -62,10 +107,109 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     try {
       await deleteIllustration(deleteTarget.id);
       setDeleteTarget(null);
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(deleteTarget.id); return next; });
+      addToast('Illustration deleted', 'success');
       await fetchIllustrations();
       if (onArtistUpdated) onArtistUpdated();
     } catch (err) {
-      setError(err.message);
+      addToast(err.message || 'Failed to delete', 'error');
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    setBatchDeleting(true);
+    const ids = [...selectedIds];
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await deleteIllustration(id);
+      } catch {
+        failed++;
+      }
+    }
+    setBatchDeleting(false);
+    setSelectedIds(new Set());
+    setLastClickedId(null);
+    if (failed === 0) {
+      addToast(`${ids.length} illustration(s) deleted`, 'success');
+    } else {
+      addToast(`${ids.length - failed} deleted, ${failed} failed`, 'error');
+    }
+    await fetchIllustrations();
+    if (onArtistUpdated) onArtistUpdated();
+  };
+
+  const handleBatchDownload = async () => {
+    const selected = illustrations.filter((i) => selectedIds.has(i.id));
+    addToast(`Downloading ${selected.length} file(s)...`, 'success');
+    for (const ill of selected) {
+      try {
+        const res = await fetch(`http://localhost:8000${ill.file_url}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = ill.original_filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch {
+        // continue to next file on error
+      }
+    }
+  };
+
+  const handleCardClick = (ill) => {
+    setSelectedIds(new Set());
+    setLastClickedId(ill.id);
+    const idx = sortedIllustrations.findIndex((i) => i.id === ill.id);
+    if (idx !== -1) setLightboxIndex(idx);
+  };
+
+  const handleCtrlClick = (ill) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(ill.id)) next.delete(ill.id);
+      else next.add(ill.id);
+      return next;
+    });
+    setLastClickedId(ill.id);
+  };
+
+  const handleShiftClick = (ill) => {
+    if (lastClickedId === null) {
+      handleCardClick(ill);
+      return;
+    }
+    const lastIdx = sortedIllustrations.findIndex((i) => i.id === lastClickedId);
+    const currIdx = sortedIllustrations.findIndex((i) => i.id === ill.id);
+    if (lastIdx === -1 || currIdx === -1) return;
+    const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
+    const rangeIds = sortedIllustrations.slice(start, end + 1).map((i) => i.id);
+    setSelectedIds((prev) => new Set([...prev, ...rangeIds]));
+    setLastClickedId(ill.id);
+  };
+
+  const handleLightboxDelete = async (ill) => {
+    try {
+      await deleteIllustration(ill.id);
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(ill.id); return next; });
+      addToast('Illustration deleted', 'success');
+      await fetchIllustrations();
+      if (onArtistUpdated) onArtistUpdated();
+    } catch (err) {
+      addToast(err.message || 'Failed to delete', 'error');
+    }
+  };
+
+  const handleLightboxSetCover = async (ill) => {
+    try {
+      await updateArtist(artist.id, { cover_illustration_id: ill.id });
+      addToast('Cover updated successfully', 'success');
+      if (onArtistUpdated) onArtistUpdated();
+    } catch (err) {
+      addToast(err.message || 'Failed to set cover', 'error');
     }
   };
 
@@ -88,6 +232,40 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Sort controls */}
+            {illustrations.length > 1 && (
+              <div className="flex items-center gap-1">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50 appearance-none cursor-pointer"
+                >
+                  {SORT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value} className="bg-gray-900 text-gray-200">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                {sortBy && (
+                  <button
+                    onClick={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                    className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors"
+                    title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                  >
+                    {sortOrder === 'asc' ? (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
@@ -128,19 +306,73 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               <AnimatePresence mode="popLayout">
-                {illustrations.map((ill) => (
-                  <IllustrationGridItem
+                {sortedIllustrations.map((ill) => (
+                  <IllustrationCard
                     key={ill.id}
                     illustration={ill}
+                    onClick={handleCardClick}
+                    onCtrlClick={handleCtrlClick}
+                    onShiftClick={handleShiftClick}
                     onSetCover={setCoverTarget}
                     onDelete={setDeleteTarget}
-                    onClick={setLightboxIll}
+                    isSelected={selectedIds.has(ill.id)}
+                    showHoverActions={true}
                   />
                 ))}
               </AnimatePresence>
             </div>
           )}
         </div>
+
+        {/* Key hints */}
+        {selectedIds.size === 0 && illustrations.length > 0 && (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] px-4 py-2 rounded-lg bg-black/50 backdrop-blur text-xs text-gray-500 flex items-center gap-3 select-none">
+            <span><kbd className="px-1 py-0.5 rounded bg-white/10 text-gray-400 text-[10px] font-mono">Click</kbd> to view</span>
+            <span className="text-gray-700">|</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-white/10 text-gray-400 text-[10px] font-mono">Ctrl+Click</kbd> multi-select</span>
+            <span className="text-gray-700">|</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-white/10 text-gray-400 text-[10px] font-mono">Shift+Click</kbd> range select</span>
+          </div>
+        )}
+
+        {/* Batch action bar */}
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            className="fixed bottom-0 left-0 right-0 z-[55] bg-gray-900 border-t border-gray-800 px-6 py-4 flex items-center justify-between shadow-2xl"
+          >
+            <span className="text-sm text-gray-300">{selectedIds.size} selected</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleBatchDownload}
+                className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm text-gray-200 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                disabled={batchDeleting}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-sm text-white transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                {batchDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+              <button
+                onClick={() => { setSelectedIds(new Set()); setLastClickedId(null); }}
+                className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* Confirm: set as cover */}
@@ -167,73 +399,15 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
       )}
 
       {/* Lightbox */}
-      {lightboxIll && (
+      {lightboxIndex !== null && (
         <Lightbox
-          illustration={lightboxIll}
-          onClose={() => setLightboxIll(null)}
+          illustrations={sortedIllustrations}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onDelete={handleLightboxDelete}
+          onSetCover={handleLightboxSetCover}
         />
       )}
     </>
-  );
-}
-
-function IllustrationGridItem({ illustration, onSetCover, onDelete, onClick }) {
-  const [imgError, setImgError] = useState(false);
-
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ duration: 0.2, ease: 'easeOut' }}
-      className="group relative bg-gray-900 rounded-lg border border-gray-800 overflow-hidden hover:border-purple-500/40 transition-colors"
-    >
-      {/* Thumbnail */}
-      <div
-        className="aspect-square bg-gray-800 flex items-center justify-center overflow-hidden cursor-pointer"
-        onClick={() => onClick(illustration)}
-      >
-        {imgError ? (
-          <span className="text-gray-600 text-xs">Load failed</span>
-        ) : (
-          <img
-            src={`http://localhost:8000${illustration.thumbnail_url}`}
-            alt={illustration.original_filename}
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-          />
-        )}
-      </div>
-
-      {/* Hover actions */}
-      <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex justify-center gap-2">
-        <button
-          onClick={(e) => { e.stopPropagation(); onSetCover(illustration); }}
-          className="px-2 py-1 rounded text-xs bg-purple-600/80 hover:bg-purple-500 text-white transition-colors"
-        >
-          Set Cover
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(illustration); }}
-          className="px-2 py-1 rounded text-xs bg-red-600/80 hover:bg-red-500 text-white transition-colors"
-        >
-          Delete
-        </button>
-      </div>
-
-      {/* Tags */}
-      {illustration.tags && (
-        <div className="p-2">
-          <div className="flex flex-wrap gap-1">
-            {illustration.tags.split(',').filter(Boolean).slice(0, 3).map((tag, i) => (
-              <span key={i} className="px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-400">
-                {tag.trim()}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </motion.div>
   );
 }
