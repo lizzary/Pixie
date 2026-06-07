@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { listTags, listPrompts } from '../api';
 
 // Module-level cache shared across all instances
-const _cache = { tag: null, prompt: null };
+const _cache = { tag: null, prompt: null, mixed: null };
 
 export default function TagPromptSuggest({
   type,
@@ -12,6 +12,7 @@ export default function TagPromptSuggest({
   className = '',
   inputClassName = '',
   onEnter,
+  onSelect,
 }) {
   const [suggestions, setSuggestions] = useState([]);
   const [allItems, setAllItems] = useState([]);
@@ -22,18 +23,48 @@ export default function TagPromptSuggest({
 
   // Fetch full list once, using cache
   useEffect(() => {
-    if (_cache[type]) {
-      setAllItems(_cache[type]);
+    if (type !== 'mixed') {
+      if (_cache[type]) {
+        setAllItems(_cache[type]);
+        return;
+      }
+      const fetcher = type === 'tag' ? listTags : listPrompts;
+      let cancelled = false;
+      fetcher()
+        .then((data) => {
+          if (!cancelled) {
+            _cache[type] = data;
+            setAllItems(data);
+          }
+        })
+        .catch(() => {});
+      return () => { cancelled = true; };
+    }
+
+    // Mixed type — fetch both
+    if (_cache.mixed) {
+      setAllItems(_cache.mixed);
       return;
     }
-    const fetcher = type === 'tag' ? listTags : listPrompts;
     let cancelled = false;
-    fetcher()
-      .then((data) => {
-        if (!cancelled) {
-          _cache[type] = data;
-          setAllItems(data);
+    Promise.all([listTags(), listPrompts()])
+      .then(([tags, prompts]) => {
+        if (cancelled) return;
+        const map = new Map();
+        for (const t of tags) map.set(t, { types: ['tag'] });
+        for (const p of prompts) {
+          if (map.has(p)) {
+            map.get(p).types.push('prompt');
+          } else {
+            map.set(p, { types: ['prompt'] });
+          }
         }
+        const merged = [...map.entries()].map(([text, meta]) => ({
+          text,
+          types: meta.types,
+        }));
+        _cache.mixed = merged;
+        setAllItems(merged);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -47,13 +78,20 @@ export default function TagPromptSuggest({
       return;
     }
     const lower = value.toLowerCase();
-    const matches = allItems
-      .filter((item) => item.toLowerCase().includes(lower) && item.toLowerCase() !== lower)
-      .slice(0, 8);
+    let matches;
+    if (type === 'mixed') {
+      matches = allItems
+        .filter((item) => item.text.toLowerCase().includes(lower) && item.text.toLowerCase() !== lower)
+        .slice(0, 8);
+    } else {
+      matches = allItems
+        .filter((item) => item.toLowerCase().includes(lower) && item.toLowerCase() !== lower)
+        .slice(0, 8);
+    }
     setSuggestions(matches);
     setShowDropdown(matches.length > 0);
     setActiveIndex(-1);
-  }, [value, allItems]);
+  }, [value, allItems, type]);
 
   // Click outside closes dropdown
   useEffect(() => {
@@ -73,16 +111,28 @@ export default function TagPromptSuggest({
 
   const selectSuggestion = useCallback(
     (item) => {
-      onChange(item);
+      if (type === 'mixed') {
+        onChange(item.text);
+        const scope = item.types.length === 2 ? 'all' : item.types[0];
+        if (onSelect) onSelect(item.text, scope);
+      } else {
+        onChange(item);
+      }
       setShowDropdown(false);
       setActiveIndex(-1);
       inputRef.current?.focus();
     },
-    [onChange]
+    [onChange, onSelect, type]
   );
 
   const handleKeyDown = (e) => {
-    if (!showDropdown) return;
+    if (!showDropdown) {
+      if (e.key === 'Enter' && onEnter && value.trim()) {
+        e.preventDefault();
+        onEnter(value.trim());
+      }
+      return;
+    }
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -112,6 +162,15 @@ export default function TagPromptSuggest({
     }
   };
 
+  const resolveItemKey = (item) => (type === 'mixed' ? item.text : item);
+  const resolveItemText = (item) => (type === 'mixed' ? item.text : item);
+
+  const typeLabel = (item) => {
+    if (type !== 'mixed') return type;
+    if (item.types.length === 2) return 'tag & prompt';
+    return item.types[0];
+  };
+
   return (
     <div className={`relative ${className}`}>
       <input
@@ -134,7 +193,7 @@ export default function TagPromptSuggest({
         >
           {suggestions.map((item, idx) => (
             <button
-              key={item}
+              key={resolveItemKey(item)}
               onClick={() => selectSuggestion(item)}
               className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors ${
                 idx === activeIndex
@@ -142,8 +201,10 @@ export default function TagPromptSuggest({
                   : 'hover:bg-edge-secondary'
               }`}
             >
-              <span className={idx === activeIndex ? 'text-accent' : 'text-content-secondary'}>{item}</span>
-              <span className="text-xs text-content-muted shrink-0 ml-3">{type}</span>
+              <span className={idx === activeIndex ? 'text-accent' : 'text-content-secondary'}>
+                {resolveItemText(item)}
+              </span>
+              <span className="text-xs text-content-muted shrink-0 ml-3">{typeLabel(item)}</span>
             </button>
           ))}
         </div>

@@ -56,6 +56,15 @@ export function uploadIllustrations(artistId, files) {
   );
 }
 
+export function uploadSingleIllustration(artistId, file) {
+  const formData = new FormData();
+  formData.append('files', file);
+  return request(
+    `/api/artists/${artistId}/illustrations/upload`,
+    { method: 'POST', body: formData },
+  );
+}
+
 export function getIllustration(illustrationId) {
   return request(`/api/illustrations/${illustrationId}`);
 }

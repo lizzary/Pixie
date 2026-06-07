@@ -9,6 +9,7 @@ import ConfirmModal from './ConfirmModal';
 import Lightbox from './Lightbox';
 import ColorGroup from './ColorGroup';
 import DropdownSelect from './DropdownSelect';
+import TagPromptSuggest from './TagPromptSuggest';
 import GroupConfigModal from './GroupConfigModal';
 import useGroupConfig from '../hooks/useGroupConfig';
 import { matchesTagPair, matchesPromptPair, groupIllustrations, GROUP_BY_OPTIONS } from '../utils/grouping';
@@ -27,6 +28,8 @@ export default function SearchOverlay({ query, onClose }) {
   const [groupBy, setGroupBy] = useState('none');
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const [showGroupConfig, setShowGroupConfig] = useState(false);
+  const [filterQuery, setFilterQuery] = useState('');
+  const [filterScope, setFilterScope] = useState('all');
   const { addToast } = useToast();
   const [quality, setQuality] = useQuality();
 
@@ -54,13 +57,34 @@ export default function SearchOverlay({ query, onClose }) {
 
   const items = results ? results.items : [];
 
+  // ── Client-side filter (tags + prompts) ──────────────
+
+  const filteredItems = useMemo(() => {
+    if (!filterQuery.trim()) return items;
+    const q = filterQuery.trim().toLowerCase();
+    return items.filter((ill) => {
+      const tags = (ill.tags || '').toLowerCase();
+      const ext = ill.extended_data || {};
+      const pos = (ext['Positive Prompt'] || '').toLowerCase();
+      const neg = (ext['Negative Prompt'] || '').toLowerCase();
+      switch (filterScope) {
+        case 'tag':
+          return tags.includes(q);
+        case 'prompt':
+          return pos.includes(q) || neg.includes(q);
+        default:
+          return tags.includes(q) || pos.includes(q) || neg.includes(q);
+      }
+    });
+  }, [items, filterQuery, filterScope]);
+
   // ── Grouping ───────────────────────────────────────────
 
   const groupedIllustrations = useMemo(() => {
-    if (groupBy === 'none' || activeConfig.pairs.length === 0 || items.length === 0) return null;
+    if (groupBy === 'none' || activeConfig.pairs.length === 0 || filteredItems.length === 0) return null;
     const matchFn = groupBy === 'tag' ? matchesTagPair : matchesPromptPair;
-    return groupIllustrations(items, activeConfig.pairs, activeConfig.otherColor, matchFn);
-  }, [groupBy, items, activeConfig]);
+    return groupIllustrations(filteredItems, activeConfig.pairs, activeConfig.otherColor, matchFn);
+  }, [groupBy, filteredItems, activeConfig]);
 
   const displayedItems = useMemo(() => {
     if (groupedIllustrations) {
@@ -72,8 +96,8 @@ export default function SearchOverlay({ query, onClose }) {
       }
       return flat;
     }
-    return items;
-  }, [groupedIllustrations, collapsedGroups, items]);
+    return filteredItems;
+  }, [groupedIllustrations, collapsedGroups, filteredItems]);
 
   const toggleGroupCollapse = useCallback((groupId) => {
     setCollapsedGroups((prev) => {
@@ -227,10 +251,34 @@ export default function SearchOverlay({ query, onClose }) {
           <h2 className="text-lg font-semibold text-content-primary">
             Search: <span className="text-accent">{query}</span>
           </h2>
-          {results && <span className="text-sm text-content-muted">{results.total} results</span>}
+          {results && (
+            <>
+              <span className="text-sm text-content-muted">
+                {filterQuery.trim()
+                  ? `${filteredItems.length} of ${results.total} results`
+                  : `${results.total} results`}
+              </span>
+              {filterQuery.trim() && filterScope !== 'all' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-medium uppercase">
+                  {filterScope}
+                </span>
+              )}
+            </>
+          )}
 
           {/* Group By & Quality controls */}
           <div className="ml-auto flex items-center gap-3">
+            {/* In-page search */}
+            <TagPromptSuggest
+              type="mixed"
+              value={filterQuery}
+              onChange={(v) => { setFilterQuery(v); if (!v) setFilterScope('all'); }}
+              onSelect={(v, scope) => { setFilterQuery(v); setFilterScope(scope); }}
+              onEnter={(v) => { setFilterQuery(v); setFilterScope('all'); }}
+              placeholder="Filter by tag or prompt..."
+              className="w-52"
+              inputClassName="w-full pl-3 pr-3 py-2 rounded-lg bg-surface-tertiary border border-edge-secondary text-sm text-content-primary placeholder-content-muted focus:outline-none focus:border-accent/50 transition-colors"
+            />
             {items.length > 1 && (
               <DropdownSelect
                 icon={Layers}
@@ -294,7 +342,7 @@ export default function SearchOverlay({ query, onClose }) {
             /* Flat grid */
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               <AnimatePresence mode="popLayout">
-                {items.map((ill) => (
+                {filteredItems.map((ill) => (
                   <IllustrationCard {...cardProps(ill)} />
                 ))}
               </AnimatePresence>

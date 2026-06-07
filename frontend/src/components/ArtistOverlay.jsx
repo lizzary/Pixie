@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, Layers, Settings, Upload, Download, Trash2, X, Monitor } from 'lucide-react';
+import { ArrowUpDown, Layers, Settings, Upload, Download, Trash2, X, Monitor, Loader2 } from 'lucide-react';
 import useQuality, { QUALITY_OPTIONS } from '../hooks/useQuality';
-import { listIllustrations, uploadIllustrations, updateArtist, deleteIllustration } from '../api';
+import { listIllustrations, uploadSingleIllustration, updateArtist, deleteIllustration } from '../api';
 import { useToast } from './Toast';
 import ConfirmModal from './ConfirmModal';
 import Lightbox from './Lightbox';
 import IllustrationCard from './IllustrationCard';
 import ColorGroup from './ColorGroup';
 import DropdownSelect from './DropdownSelect';
+import TagPromptSuggest from './TagPromptSuggest';
 import GroupConfigModal from './GroupConfigModal';
 import useGroupConfig from '../hooks/useGroupConfig';
 import { matchesTagPair, matchesPromptPair, groupIllustrations, GROUP_BY_OPTIONS } from '../utils/grouping';
@@ -26,6 +27,9 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
   const [illustrations, setIllustrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // { current, total, filename, stage }
+  const [filterQuery, setFilterQuery] = useState('');
+  const [filterScope, setFilterScope] = useState('all'); // 'all' | 'tag' | 'prompt'
   const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [coverTarget, setCoverTarget] = useState(null);
@@ -88,18 +92,39 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     return sorted;
   }, [illustrations, sortBy, sortOrder]);
 
+  // ── Client-side filter (tags + prompts) ──────────────
+
+  const filteredIllustrations = useMemo(() => {
+    if (!filterQuery.trim()) return sortedIllustrations;
+    const q = filterQuery.trim().toLowerCase();
+    return sortedIllustrations.filter((ill) => {
+      const tags = (ill.tags || '').toLowerCase();
+      const ext = ill.extended_data || {};
+      const pos = (ext['Positive Prompt'] || '').toLowerCase();
+      const neg = (ext['Negative Prompt'] || '').toLowerCase();
+      switch (filterScope) {
+        case 'tag':
+          return tags.includes(q);
+        case 'prompt':
+          return pos.includes(q) || neg.includes(q);
+        default:
+          return tags.includes(q) || pos.includes(q) || neg.includes(q);
+      }
+    });
+  }, [sortedIllustrations, filterQuery, filterScope]);
+
   // ── Grouping ───────────────────────────────────────────
 
   const groupedIllustrations = useMemo(() => {
     if (groupBy === 'none' || activeConfig.pairs.length === 0) return null;
     const matchFn = groupBy === 'tag' ? matchesTagPair : matchesPromptPair;
     return groupIllustrations(
-      sortedIllustrations,
+      filteredIllustrations,
       activeConfig.pairs,
       activeConfig.otherColor,
       matchFn
     );
-  }, [groupBy, sortedIllustrations, activeConfig]);
+  }, [groupBy, filteredIllustrations, activeConfig]);
 
   // Flat list matching visual order (for index lookups in Shift+Click / Lightbox)
   const displayedIllustrations = useMemo(() => {
@@ -112,8 +137,8 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
       }
       return flat;
     }
-    return sortedIllustrations;
-  }, [groupedIllustrations, collapsedGroups, sortedIllustrations]);
+    return filteredIllustrations;
+  }, [groupedIllustrations, collapsedGroups, filteredIllustrations]);
 
   const toggleGroupCollapse = useCallback((groupId) => {
     setCollapsedGroups((prev) => {
@@ -133,15 +158,24 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     setError('');
     setSelectedIds(new Set());
     setLastClickedId(null);
-    try {
-      await uploadIllustrations(artist.id, files);
+    const total = files.length;
+    let succeeded = 0;
+    for (let i = 0; i < total; i++) {
+      const file = files[i];
+      setUploadProgress({ current: i + 1, total, filename: file.name, stage: 'uploading' });
+      try {
+        await uploadSingleIllustration(artist.id, file);
+        succeeded++;
+      } catch (err) {
+        setError(`${file.name}: ${err.message || 'Upload failed'}`);
+      }
+    }
+    setUploadProgress(null);
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (succeeded > 0) {
       await fetchIllustrations();
       if (onArtistUpdated) onArtistUpdated();
-    } catch (err) {
-      setError(err.message || 'Upload failed');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -299,10 +333,31 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
               </svg>
             </button>
             <h2 className="text-lg font-semibold text-content-primary">{artist.name}</h2>
-            <span className="text-sm text-content-muted">{illustrations.length} illustrations</span>
+            <span className="text-sm text-content-muted">
+              {filterQuery.trim()
+                ? `${filteredIllustrations.length} of ${illustrations.length} illustrations`
+                : `${illustrations.length} illustrations`}
+            </span>
+            {filterQuery.trim() && filterScope !== 'all' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-medium uppercase">
+                {filterScope}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
+            {/* In-page search */}
+            <TagPromptSuggest
+              type="mixed"
+              value={filterQuery}
+              onChange={(v) => { setFilterQuery(v); if (!v) setFilterScope('all'); }}
+              onSelect={(v, scope) => { setFilterQuery(v); setFilterScope(scope); }}
+              onEnter={(v) => { setFilterQuery(v); setFilterScope('all'); }}
+              placeholder="Filter by tag or prompt..."
+              className="w-52"
+              inputClassName="w-full pl-3 pr-3 py-2 rounded-lg bg-surface-tertiary border border-edge-secondary text-sm text-content-primary placeholder-content-muted focus:outline-none focus:border-accent/50 transition-colors"
+            />
+
             {/* Sort controls */}
             {illustrations.length > 1 && (
               <DropdownSelect
@@ -386,6 +441,29 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
             </div>
           )}
 
+          {/* Upload progress bar */}
+          {uploadProgress && (
+            <div className="mb-4 p-4 rounded-xl bg-surface-secondary border border-edge-primary">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-content-primary flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+                  Uploading {uploadProgress.current} of {uploadProgress.total}
+                </span>
+                <span className="text-xs text-content-muted truncate ml-4 max-w-[300px]">
+                  {uploadProgress.filename}
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-surface-tertiary overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full bg-accent"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                  transition={{ duration: 0.3, ease: 'easeOut' }}
+                />
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex items-center justify-center h-64 text-content-muted text-sm">Loading...</div>
           ) : illustrations.length === 0 ? (
@@ -416,7 +494,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
             /* Flat grid (no grouping) */
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               <AnimatePresence mode="popLayout">
-                {sortedIllustrations.map((ill) => (
+                {filteredIllustrations.map((ill) => (
                   <IllustrationCard {...cardProps(ill)} />
                 ))}
               </AnimatePresence>
