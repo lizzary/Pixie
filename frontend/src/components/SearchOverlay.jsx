@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { searchIllustrations, updateArtist, deleteIllustration } from '../api';
+import { searchIllustrations, deleteIllustration } from '../api';
 import { useToast } from './Toast';
 import IllustrationCard from './IllustrationCard';
 import ConfirmModal from './ConfirmModal';
+import Lightbox from './Lightbox';
 import ColorGroup from './ColorGroup';
 import GroupConfigModal from './GroupConfigModal';
 import useGroupConfig from '../hooks/useGroupConfig';
@@ -16,10 +17,10 @@ export default function SearchOverlay({ query, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [coverTarget, setCoverTarget] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [lastClickedId, setLastClickedId] = useState(null);
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
   const [groupBy, setGroupBy] = useState('none');
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const [showGroupConfig, setShowGroupConfig] = useState(false);
@@ -99,21 +100,11 @@ export default function SearchOverlay({ query, onClose }) {
     }
   };
 
-  const handleSetCoverConfirm = async () => {
-    if (!coverTarget) return;
-    try {
-      await updateArtist(coverTarget.artist_id, { cover_illustration_id: coverTarget.id });
-      addToast('Cover updated successfully', 'success');
-    } catch (err) {
-      addToast(err.message || 'Failed to set cover', 'error');
-    } finally {
-      setCoverTarget(null);
-    }
-  };
-
   const handleCardClick = (ill) => {
     setSelectedIds(new Set());
     setLastClickedId(ill.id);
+    const idx = displayedItems.findIndex((i) => i.id === ill.id);
+    if (idx !== -1) setLightboxIndex(idx);
   };
 
   const handleCtrlClick = (ill) => {
@@ -187,13 +178,27 @@ export default function SearchOverlay({ query, onClose }) {
     }
   };
 
+  const handleLightboxDelete = async (ill) => {
+    try {
+      await deleteIllustration(ill.id);
+      setResults((prev) => prev ? {
+        ...prev,
+        items: prev.items.filter((i) => i.id !== ill.id),
+        total: prev.total - 1,
+      } : prev);
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(ill.id); return next; });
+      addToast('Illustration deleted', 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to delete', 'error');
+    }
+  };
+
   const cardProps = useCallback((ill) => ({
     key: ill.id,
     illustration: ill,
     onClick: handleCardClick,
     onCtrlClick: handleCtrlClick,
     onShiftClick: handleShiftClick,
-    onSetCover: setCoverTarget,
     onDelete: setDeleteTarget,
     isSelected: selectedIds.has(ill.id),
     showHoverActions: true,
@@ -356,14 +361,13 @@ export default function SearchOverlay({ query, onClose }) {
         )}
       </AnimatePresence>
 
-      {/* Confirm: set as cover */}
-      {coverTarget && (
-        <ConfirmModal
-          title="Set as Cover"
-          message={`Use "${coverTarget.original_filename}" as the cover for ${coverTarget.artist_name}?`}
-          confirmText="Set Cover"
-          onConfirm={handleSetCoverConfirm}
-          onCancel={() => setCoverTarget(null)}
+      {/* Lightbox */}
+      {lightboxIndex !== null && (
+        <Lightbox
+          illustrations={displayedItems}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onDelete={handleLightboxDelete}
         />
       )}
 
