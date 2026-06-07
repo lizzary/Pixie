@@ -47,11 +47,11 @@ export function listIllustrations(artistId, offset = 0, limit = 200) {
   return request(`/api/artists/${artistId}/illustrations?offset=${offset}&limit=${limit}`);
 }
 
-export function uploadIllustrations(artistId, files, isAiGenerated = false) {
+export function uploadIllustrations(artistId, files) {
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
   return request(
-    `/api/artists/${artistId}/illustrations/upload?is_ai_generated=${isAiGenerated}`,
+    `/api/artists/${artistId}/illustrations/upload`,
     { method: 'POST', body: formData },
   );
 }
@@ -70,6 +70,10 @@ export function updateIllustration(illustrationId, data) {
 
 export function deleteIllustration(illustrationId) {
   return request(`/api/illustrations/${illustrationId}`, { method: 'DELETE' });
+}
+
+export function getIllustrationMetadata(illustrationId) {
+  return request(`/api/illustrations/${illustrationId}/metadata`);
 }
 
 // ── Search ─────────────────────────────────────────────

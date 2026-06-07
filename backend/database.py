@@ -33,7 +33,6 @@ def init_db() -> None:
             mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
             tags TEXT NOT NULL DEFAULT '',
             extended_data TEXT DEFAULT NULL,
-            is_ai_generated INTEGER NOT NULL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
             FOREIGN KEY (artist_id) REFERENCES artists(id) ON DELETE CASCADE
         );

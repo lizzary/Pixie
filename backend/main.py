@@ -16,7 +16,7 @@ from models import (
     IllustrationResponse, IllustrationUpdate,
     SearchResult,
 )
-from utils import extract_extended_data, extract_tags, create_thumbnail, get_image_info
+from utils import extract_metadata, extract_tags, create_thumbnail, get_image_info
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -79,7 +79,6 @@ def _row_to_illustration(row) -> IllustrationResponse:
         mime_type=row["mime_type"],
         tags=row["tags"],
         extended_data=json.loads(row["extended_data"]) if row["extended_data"] else None,
-        is_ai_generated=bool(row["is_ai_generated"]),
         thumbnail_url=f"/api/illustrations/{iid}/thumbnail",
         file_url=f"/api/illustrations/{iid}/file",
         created_at=row["created_at"],
@@ -225,7 +224,6 @@ def list_illustrations(
 def upload_illustrations(
     artist_id: int,
     files: list[UploadFile] = File(...),
-    is_ai_generated: bool = Query(False),
 ):
     conn = get_db()
     artist = conn.execute("SELECT id, name FROM artists WHERE id = ?", (artist_id,)).fetchone()
@@ -245,7 +243,7 @@ def upload_illustrations(
         try:
             contents = upload.file.read()
             image = Image.open(BytesIO(contents))
-            image.load()  # force decode so we catch corrupt images early
+            image.load()
         except UnidentifiedImageError:
             raise HTTPException(400, f"Cannot identify image: {safe_filename}")
         except Exception:
@@ -253,7 +251,6 @@ def upload_illustrations(
 
         try:
             tags = extract_tags(image)
-            extended_data = extract_extended_data(image)
             width, height, mime_type = get_image_info(image)
             thumb = create_thumbnail(image)
 
@@ -261,8 +258,8 @@ def upload_illustrations(
             cur = conn.execute(
                 """INSERT INTO illustrations
                    (artist_id, filename, original_filename, file_size, width, height,
-                    mime_type, tags, extended_data, is_ai_generated)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    mime_type, tags, extended_data)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     artist_id,
                     "",  # placeholder, set after we know the id
@@ -272,16 +269,30 @@ def upload_illustrations(
                     height,
                     mime_type,
                     tags,
-                    json.dumps(extended_data, ensure_ascii=False) if extended_data else None,
-                    1 if is_ai_generated else 0,
+                    None,  # extended_data will be updated after files are written to disk
                 ),
             )
             ill_id = cur.lastrowid
             disk_filename = f"{ill_id}_{safe_filename}"
 
+            # Write files to disk first (needed for metadata extraction)
+            originals_dir = os.path.join(UPLOADS_DIR, str(artist_id), "originals")
+            thumbnails_dir = os.path.join(UPLOADS_DIR, str(artist_id), "thumbnails")
+
+            image.save(os.path.join(originals_dir, disk_filename))
+            thumb.save(os.path.join(thumbnails_dir, disk_filename), format="JPEG")
+
+            # Extract ComfyUI metadata from saved file
+            saved_path = os.path.join(originals_dir, disk_filename)
+            try:
+                metadata = extract_metadata(saved_path, image)
+                extended_data_json = json.dumps(metadata, ensure_ascii=False)
+            except Exception:
+                extended_data_json = None
+
             conn.execute(
-                "UPDATE illustrations SET filename = ? WHERE id = ?",
-                (disk_filename, ill_id),
+                "UPDATE illustrations SET filename = ?, extended_data = ? WHERE id = ?",
+                (disk_filename, extended_data_json, ill_id),
             )
             conn.commit()
 
@@ -291,19 +302,11 @@ def upload_illustrations(
             ).fetchone()
             conn.close()
 
-            # Write files to disk
-            originals_dir = os.path.join(UPLOADS_DIR, str(artist_id), "originals")
-            thumbnails_dir = os.path.join(UPLOADS_DIR, str(artist_id), "thumbnails")
-
-            image.save(os.path.join(originals_dir, disk_filename))
-            thumb.save(os.path.join(thumbnails_dir, disk_filename), format="JPEG")
-
             results.append(_row_to_illustration(row))
 
         except HTTPException:
             raise
         except Exception as exc:
-            # Clean up partial state on unexpected error
             raise HTTPException(500, f"Failed to process {safe_filename}: {exc}")
 
     return results
@@ -394,16 +397,11 @@ def update_illustration(illustration_id: int, body: IllustrationUpdate):
         conn.close()
         raise HTTPException(404, "Illustration not found")
 
-    updates: dict = {}
-    if body.is_ai_generated is not None:
-        updates["is_ai_generated"] = 1 if body.is_ai_generated else 0
     if body.tags is not None:
-        updates["tags"] = body.tags
-
-    if updates:
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [illustration_id]
-        conn.execute(f"UPDATE illustrations SET {set_clause} WHERE id = ?", values)
+        conn.execute(
+            "UPDATE illustrations SET tags = ? WHERE id = ?",
+            (body.tags, illustration_id),
+        )
         conn.commit()
 
     row = conn.execute(
@@ -412,6 +410,21 @@ def update_illustration(illustration_id: int, body: IllustrationUpdate):
     ).fetchone()
     conn.close()
     return _row_to_illustration(row)
+
+
+@app.get("/api/illustrations/{illustration_id}/metadata")
+def get_illustration_metadata(illustration_id: int):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT extended_data FROM illustrations WHERE id = ?",
+        (illustration_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(404, "Illustration not found")
+    if row["extended_data"]:
+        return json.loads(row["extended_data"])
+    return {}
 
 
 # ── Search ──────────────────────────────────────────────

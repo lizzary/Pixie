@@ -36,14 +36,12 @@ class IllustrationResponse(BaseModel):
     mime_type: str
     tags: str = ""
     extended_data: Optional[dict] = None
-    is_ai_generated: bool = False
     thumbnail_url: str
     file_url: str
     created_at: str
 
 
 class IllustrationUpdate(BaseModel):
-    is_ai_generated: Optional[bool] = None
     tags: Optional[str] = None
 
 
@@ -56,7 +54,6 @@ class IllustrationListItem(BaseModel):
     height: Optional[int] = None
     mime_type: str
     tags: str = ""
-    is_ai_generated: bool = False
     thumbnail_url: str
     file_url: str
     created_at: str
