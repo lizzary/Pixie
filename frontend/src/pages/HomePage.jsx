@@ -2,30 +2,30 @@ import { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import ArtistCard from '../components/ArtistCard';
-import CreateArtistModal from '../components/CreateArtistModal';
+import GroupCard from '../components/GroupCard';
+import CreateGroupModal from '../components/CreateGroupModal';
 import ConfirmModal from '../components/ConfirmModal';
-import ArtistOverlay from '../components/ArtistOverlay';
+import GroupOverlay from '../components/GroupOverlay';
 import SearchOverlay from '../components/SearchOverlay';
-import { listArtists, createArtist, deleteArtist } from '../api';
+import { listGroups, createGroup, deleteGroup } from '../api';
 import useQuality from '../hooks/useQuality';
 import { useLocale } from '../contexts/LocaleContext';
 
 export default function HomePage() {
-  const [artists, setArtists] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedArtist, setSelectedArtist] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
   const [searchQuery, setSearchQuery] = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(null); // { artist }
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // { group }
   const [quality] = useQuality();
   const { t } = useLocale();
 
-  const fetchArtists = useCallback(async () => {
+  const fetchGroups = useCallback(async () => {
     try {
-      const data = await listArtists();
-      setArtists(data);
+      const data = await listGroups();
+      setGroups(data);
       setError('');
     } catch (err) {
       setError(err.message || t('home.error.load'));
@@ -35,20 +35,20 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    fetchArtists();
-  }, [fetchArtists]);
+    fetchGroups();
+  }, [fetchGroups]);
 
   const handleCreate = async (name) => {
-    await createArtist(name);
-    await fetchArtists();
+    await createGroup(name);
+    await fetchGroups();
   };
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     try {
-      await deleteArtist(deleteConfirm.id);
+      await deleteGroup(deleteConfirm.id);
       setDeleteConfirm(null);
-      await fetchArtists();
+      await fetchGroups();
       setError('');
     } catch (err) {
       setError(err.message || t('home.error.delete'));
@@ -74,21 +74,21 @@ export default function HomePage() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold text-content-primary">{t('home.heading')}</h1>
-            <p className="text-sm text-content-muted mt-1">{t('home.subtitle', { count: artists.length })}</p>
+            <p className="text-sm text-content-muted mt-1">{t('home.subtitle', { count: groups.length })}</p>
           </div>
           <button
             onClick={() => setShowCreate(true)}
             className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-sm font-medium text-white shadow-lg shadow-accent/20 hover:shadow-accent/30 transition-all hover:scale-[1.03] inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
-            {t('home.newArtist')}
+            {t('home.newGroup')}
           </button>
         </div>
 
-        {/* Artist grid */}
+        {/* Group grid */}
         {loading ? (
           <div className="flex items-center justify-center h-64 text-content-muted text-sm">{t('home.loading')}</div>
-        ) : artists.length === 0 ? (
+        ) : groups.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-content-muted">
             <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -99,11 +99,11 @@ export default function HomePage() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
             <AnimatePresence mode="popLayout">
-              {artists.map((artist) => (
-                <ArtistCard
-                  key={artist.id}
-                  artist={artist}
-                  onClick={setSelectedArtist}
+              {groups.map((group) => (
+                <GroupCard
+                  key={group.id}
+                  group={group}
+                  onClick={setSelectedGroup}
                   onDelete={setDeleteConfirm}
                   quality={quality}
                 />
@@ -115,7 +115,7 @@ export default function HomePage() {
 
       {/* Create modal */}
       {showCreate && (
-        <CreateArtistModal
+        <CreateGroupModal
           onClose={() => setShowCreate(false)}
           onSubmit={handleCreate}
         />
@@ -134,12 +134,12 @@ export default function HomePage() {
         />
       )}
 
-      {/* Artist overlay */}
-      {selectedArtist && (
-        <ArtistOverlay
-          artist={selectedArtist}
-          onClose={() => setSelectedArtist(null)}
-          onArtistUpdated={fetchArtists}
+      {/* Group overlay */}
+      {selectedGroup && (
+        <GroupOverlay
+          group={selectedGroup}
+          onClose={() => setSelectedGroup(null)}
+          onGroupUpdated={fetchGroups}
         />
       )}
 

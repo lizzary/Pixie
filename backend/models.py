@@ -2,18 +2,18 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 
-# ── Artist ──────────────────────────────────────────────
+# ── Group ──────────────────────────────────────────────
 
-class ArtistCreate(BaseModel):
+class GroupCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
 
 
-class ArtistUpdate(BaseModel):
+class GroupUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     cover_illustration_id: Optional[int] = None
 
 
-class ArtistResponse(BaseModel):
+class GroupResponse(BaseModel):
     id: int
     name: str
     cover_illustration_id: Optional[int] = None
@@ -26,8 +26,8 @@ class ArtistResponse(BaseModel):
 
 class IllustrationResponse(BaseModel):
     id: int
-    artist_id: int
-    artist_name: str = ""
+    group_id: int
+    group_name: str = ""
     filename: str
     original_filename: str
     file_size: int
@@ -47,7 +47,7 @@ class IllustrationUpdate(BaseModel):
 
 class IllustrationListItem(BaseModel):
     id: int
-    artist_id: int
+    group_id: int
     original_filename: str
     file_size: int
     width: Optional[int] = None

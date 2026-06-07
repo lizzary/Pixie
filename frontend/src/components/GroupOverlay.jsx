@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, Layers, Settings, Upload, Download, Trash2, X, Monitor, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import useQuality from '../hooks/useQuality';
 import useDownloadConfig, { resolveFilename, sanitizeFilename } from '../hooks/useDownloadConfig';
-import { listIllustrations, uploadSingleIllustration, updateArtist, deleteIllustration } from '../api';
+import { listIllustrations, uploadSingleIllustration, updateGroup, deleteIllustration } from '../api';
 import { useToast } from './Toast';
 import ConfirmModal from './ConfirmModal';
 import Lightbox from './Lightbox';
@@ -18,7 +18,7 @@ import { useLocale } from '../contexts/LocaleContext';
 
 // ── Main component ───────────────────────────────────────
 
-export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
+export default function GroupOverlay({ group, onClose, onGroupUpdated }) {
   const [illustrations, setIllustrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -53,16 +53,16 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     { value: 200, label: '200' },
     { value: 500, label: '500' },
     { value: 1000, label: '1000' },
-    { value: 'all', label: t('artistOverlay.pagination.all') },
+    { value: 'all', label: t('groupOverlay.pagination.all') },
   ], [t]);
 
   const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(totalCount / pageSize));
 
   const SORT_OPTIONS = useMemo(() => [
-    { value: '', label: t('artistOverlay.sort.default') },
-    { value: 'resolution', label: t('artistOverlay.sort.resolution') },
-    { value: 'fileSize', label: t('artistOverlay.sort.fileSize') },
-    { value: 'dateCreated', label: t('artistOverlay.sort.dateCreated') },
+    { value: '', label: t('groupOverlay.sort.default') },
+    { value: 'resolution', label: t('groupOverlay.sort.resolution') },
+    { value: 'fileSize', label: t('groupOverlay.sort.fileSize') },
+    { value: 'dateCreated', label: t('groupOverlay.sort.dateCreated') },
   ], [t]);
 
   const translatedGroupOptions = useMemo(() => [
@@ -86,7 +86,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     const limit = size === 'all' ? 100000 : size;
     const offset = size === 'all' ? 0 : (page - 1) * size;
     try {
-      const data = await listIllustrations(artist.id, offset, limit);
+      const data = await listIllustrations(group.id, offset, limit);
       setIllustrations(data.items);
       setTotalCount(data.total);
       // If current page is empty and not page 1, go back one page
@@ -98,7 +98,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     } finally {
       setLoading(false);
     }
-  }, [artist.id]);
+  }, [group.id]);
 
   useEffect(() => {
     setLoading(true);
@@ -210,10 +210,10 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
       const file = files[i];
       setUploadProgress({ current: i + 1, total, filename: file.name, stage: 'uploading' });
       try {
-        await uploadSingleIllustration(artist.id, file);
+        await uploadSingleIllustration(group.id, file);
         succeeded++;
       } catch (err) {
-        setError(`${file.name}: ${err.message || t('artistOverlay.upload.failed')}`);
+        setError(`${file.name}: ${err.message || t('groupOverlay.upload.failed')}`);
       }
     }
     setUploadProgress(null);
@@ -221,19 +221,19 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (succeeded > 0) {
       await fetchPage(currentPage, pageSize);
-      if (onArtistUpdated) onArtistUpdated();
+      if (onGroupUpdated) onGroupUpdated();
     }
   };
 
   const handleSetCoverConfirm = async () => {
     if (!coverTarget) return;
     try {
-      await updateArtist(artist.id, { cover_illustration_id: coverTarget.id });
+      await updateGroup(group.id, { cover_illustration_id: coverTarget.id });
       setCoverTarget(null);
-      addToast(t('artistOverlay.toast.coverUpdated'), 'success');
-      if (onArtistUpdated) onArtistUpdated();
+      addToast(t('groupOverlay.toast.coverUpdated'), 'success');
+      if (onGroupUpdated) onGroupUpdated();
     } catch (err) {
-      addToast(err.message || t('artistOverlay.toast.coverFailed'), 'error');
+      addToast(err.message || t('groupOverlay.toast.coverFailed'), 'error');
       setCoverTarget(null);
     }
   };
@@ -244,11 +244,11 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
       await deleteIllustration(deleteTarget.id);
       setDeleteTarget(null);
       setSelectedIds((prev) => { const next = new Set(prev); next.delete(deleteTarget.id); return next; });
-      addToast(t('artistOverlay.toast.deleted'), 'success');
+      addToast(t('groupOverlay.toast.deleted'), 'success');
       await fetchPage(currentPage, pageSize);
-      if (onArtistUpdated) onArtistUpdated();
+      if (onGroupUpdated) onGroupUpdated();
     } catch (err) {
-      addToast(err.message || t('artistOverlay.toast.deleteFailed'), 'error');
+      addToast(err.message || t('groupOverlay.toast.deleteFailed'), 'error');
     }
   };
 
@@ -267,18 +267,18 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     setSelectedIds(new Set());
     setLastClickedId(null);
     if (failed === 0) {
-      addToast(t('artistOverlay.toast.batchDeleted', { n: ids.length }), 'success');
+      addToast(t('groupOverlay.toast.batchDeleted', { n: ids.length }), 'success');
     } else {
-      addToast(t('artistOverlay.toast.batchPartial', { succeeded: ids.length - failed, failed }), 'error');
+      addToast(t('groupOverlay.toast.batchPartial', { succeeded: ids.length - failed, failed }), 'error');
     }
     await fetchPage(currentPage, pageSize);
-    if (onArtistUpdated) onArtistUpdated();
+    if (onGroupUpdated) onGroupUpdated();
   };
 
   const handleBatchDownload = async () => {
     const selected = illustrations.filter((i) => selectedIds.has(i.id));
     if (selected.length === 0) return;
-    addToast(t('artistOverlay.toast.downloading', { n: selected.length }), 'success');
+    addToast(t('groupOverlay.toast.downloading', { n: selected.length }), 'success');
     for (const ill of selected) {
       try {
         const res = await fetch(ill.file_url);
@@ -337,21 +337,21 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
     try {
       await deleteIllustration(ill.id);
       setSelectedIds((prev) => { const next = new Set(prev); next.delete(ill.id); return next; });
-      addToast(t('artistOverlay.toast.deleted'), 'success');
+      addToast(t('groupOverlay.toast.deleted'), 'success');
       await fetchPage(currentPage, pageSize);
-      if (onArtistUpdated) onArtistUpdated();
+      if (onGroupUpdated) onGroupUpdated();
     } catch (err) {
-      addToast(err.message || t('artistOverlay.toast.deleteFailed'), 'error');
+      addToast(err.message || t('groupOverlay.toast.deleteFailed'), 'error');
     }
   };
 
   const handleLightboxSetCover = async (ill) => {
     try {
-      await updateArtist(artist.id, { cover_illustration_id: ill.id });
-      addToast(t('artistOverlay.toast.coverUpdated'), 'success');
-      if (onArtistUpdated) onArtistUpdated();
+      await updateGroup(group.id, { cover_illustration_id: ill.id });
+      addToast(t('groupOverlay.toast.coverUpdated'), 'success');
+      if (onGroupUpdated) onGroupUpdated();
     } catch (err) {
-      addToast(err.message || t('artistOverlay.toast.coverFailed'), 'error');
+      addToast(err.message || t('groupOverlay.toast.coverFailed'), 'error');
     }
   };
 
@@ -384,11 +384,11 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            <h2 className="text-lg font-semibold text-content-primary">{artist.name}</h2>
+            <h2 className="text-lg font-semibold text-content-primary">{group.name}</h2>
             <span className="text-sm text-content-muted">
               {filterQuery.trim()
-                ? t('artistOverlay.filteredCount', { filteredCount: filteredIllustrations.length, total: illustrations.length })
-                : t('artistOverlay.totalCount', { total: totalCount })}
+                ? t('groupOverlay.filteredCount', { filteredCount: filteredIllustrations.length, total: illustrations.length })
+                : t('groupOverlay.totalCount', { total: totalCount })}
             </span>
             {filterQuery.trim() && filterScope !== 'all' && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-medium uppercase">
@@ -405,7 +405,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
               onChange={(v) => { setFilterQuery(v); if (!v) setFilterScope('all'); }}
               onSelect={(v, scope) => { setFilterQuery(v); setFilterScope(scope); }}
               onEnter={(v) => { setFilterQuery(v); setFilterScope('all'); }}
-              placeholder={t('artistOverlay.filter.placeholder')}
+              placeholder={t('groupOverlay.filter.placeholder')}
               className="w-52"
               inputClassName="w-full pl-3 pr-3 py-2 rounded-lg bg-surface-tertiary border border-edge-secondary text-sm text-content-primary placeholder-content-muted focus:outline-none focus:border-accent/50 transition-colors"
             />
@@ -414,7 +414,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
             {illustrations.length > 1 && (
               <DropdownSelect
                 icon={ArrowUpDown}
-                label={t('artistOverlay.sort.label')}
+                label={t('groupOverlay.sort.label')}
                 options={SORT_OPTIONS}
                 value={sortBy}
                 onChange={setSortBy}
@@ -423,10 +423,10 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
                     <button
                       onClick={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
                       className="p-2 rounded-lg bg-surface-tertiary border border-edge-secondary hover:border-edge-primary text-content-tertiary hover:text-content-primary transition-all"
-                      title={sortOrder === 'asc' ? t('artistOverlay.sort.asc') : t('artistOverlay.sort.desc')}
+                      title={sortOrder === 'asc' ? t('groupOverlay.sort.asc') : t('groupOverlay.sort.desc')}
                     >
                       <span className="text-xs font-medium">
-                        {sortOrder === 'asc' ? t('artistOverlay.sort.ascShort') : t('artistOverlay.sort.descShort')}
+                        {sortOrder === 'asc' ? t('groupOverlay.sort.ascShort') : t('groupOverlay.sort.descShort')}
                       </span>
                     </button>
                   ) : null
@@ -438,7 +438,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
             {illustrations.length > 1 && (
               <DropdownSelect
                 icon={Layers}
-                label={t('artistOverlay.group.label')}
+                label={t('groupOverlay.group.label')}
                 options={translatedGroupOptions}
                 value={groupBy}
                 onChange={(v) => { setGroupBy(v); setCollapsedGroups(new Set()); }}
@@ -447,7 +447,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
                     <button
                       onClick={() => setShowGroupConfig(true)}
                       className="p-2 rounded-lg bg-surface-tertiary border border-edge-secondary hover:border-edge-primary text-content-tertiary hover:text-content-primary transition-all"
-                      title={groupBy === 'tag' ? t('artistOverlay.group.configTag') : t('artistOverlay.group.configPrompt')}
+                      title={groupBy === 'tag' ? t('groupOverlay.group.configTag') : t('groupOverlay.group.configPrompt')}
                     >
                       <Settings className="w-3.5 h-3.5" />
                     </button>
@@ -459,7 +459,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
             {/* Quality selector */}
             <DropdownSelect
               icon={Monitor}
-              label={t('artistOverlay.quality.label')}
+              label={t('groupOverlay.quality.label')}
               options={translatedQualityOptions}
               value={quality}
               onChange={setQuality}
@@ -471,7 +471,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
               className="px-5 py-2 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-sm font-medium text-white shadow-lg shadow-accent/20 hover:shadow-accent/30 transition-all hover:scale-[1.03] inline-flex items-center gap-2"
             >
               <Upload className="w-4 h-4" />
-              {uploading ? t('artistOverlay.upload.uploading') : t('artistOverlay.upload.button')}
+              {uploading ? t('groupOverlay.upload.uploading') : t('groupOverlay.upload.button')}
             </button>
             <input
               ref={fileInputRef}
@@ -499,7 +499,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium text-content-primary flex items-center gap-2">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
-                  {t('artistOverlay.upload.progress', { current: uploadProgress.current, total: uploadProgress.total })}
+                  {t('groupOverlay.upload.progress', { current: uploadProgress.current, total: uploadProgress.total })}
                 </span>
                 <span className="text-xs text-content-muted truncate ml-4 max-w-[300px]">
                   {uploadProgress.filename}
@@ -520,11 +520,11 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
           {!loading && totalCount > 0 && (
             <div className="flex items-center justify-between mb-4 px-1">
               <div className="flex items-center gap-2 text-sm text-content-secondary">
-                <span>{t('artistOverlay.pagination.page')}</span>
+                <span>{t('groupOverlay.pagination.page')}</span>
                 <span className="font-medium text-content-primary">{currentPage}</span>
-                <span>{t('artistOverlay.pagination.of')}</span>
+                <span>{t('groupOverlay.pagination.of')}</span>
                 <span className="font-medium text-content-primary">{totalPages}</span>
-                <span className="text-content-muted ml-1">({t('artistOverlay.pagination.total', { total: totalCount })})</span>
+                <span className="text-content-muted ml-1">({t('groupOverlay.pagination.total', { total: totalCount })})</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
@@ -543,7 +543,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-                <span className="text-xs text-content-muted mx-1">{t('artistOverlay.pagination.pageSize')}</span>
+                <span className="text-xs text-content-muted mx-1">{t('groupOverlay.pagination.pageSize')}</span>
                 <div className="flex items-center gap-0.5">
                   {PAGE_SIZE_OPTIONS.map(opt => (
                     <button
@@ -564,14 +564,14 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
           )}
 
           {loading ? (
-            <div className="flex items-center justify-center h-64 text-content-muted text-sm">{t('artistOverlay.loading')}</div>
+            <div className="flex items-center justify-center h-64 text-content-muted text-sm">{t('groupOverlay.loading')}</div>
           ) : illustrations.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-content-muted">
               <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                   d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
               </svg>
-              <p className="text-sm">{t('artistOverlay.empty')}</p>
+              <p className="text-sm">{t('groupOverlay.empty')}</p>
             </div>
           ) : groupedIllustrations ? (
             /* Grouped rendering */
@@ -610,7 +610,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
               className="px-3 py-1.5 rounded-lg hover:bg-surface-tertiary text-content-tertiary hover:text-content-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm flex items-center gap-1"
             >
               <ChevronLeft className="w-4 h-4" />
-              {t('artistOverlay.pagination.prev')}
+              {t('groupOverlay.pagination.prev')}
             </button>
             <span className="text-sm text-content-secondary">
               {currentPage} / {totalPages}
@@ -620,7 +620,7 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
               disabled={currentPage >= totalPages}
               className="px-3 py-1.5 rounded-lg hover:bg-surface-tertiary text-content-tertiary hover:text-content-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm flex items-center gap-1"
             >
-              {t('artistOverlay.pagination.next')}
+              {t('groupOverlay.pagination.next')}
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
@@ -629,11 +629,11 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
         {/* Key hints */}
         {selectedIds.size === 0 && illustrations.length > 0 && (
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] px-4 py-2 rounded-lg bg-overlay/50 backdrop-blur text-xs text-content-muted flex items-center gap-3 select-none">
-            <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Click</kbd> {t('artistOverlay.keyHints.click')}</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Click</kbd> {t('groupOverlay.keyHints.click')}</span>
             <span className="text-content-muted/50">|</span>
-            <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Ctrl+Click</kbd> {t('artistOverlay.keyHints.ctrlClick')}</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Ctrl+Click</kbd> {t('groupOverlay.keyHints.ctrlClick')}</span>
             <span className="text-content-muted/50">|</span>
-            <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Shift+Click</kbd> {t('artistOverlay.keyHints.shiftClick')}</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Shift+Click</kbd> {t('groupOverlay.keyHints.shiftClick')}</span>
           </div>
         )}
 
@@ -645,14 +645,14 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
             exit={{ y: 80, opacity: 0 }}
             className="fixed bottom-0 left-0 right-0 z-[55] bg-surface-secondary border-t border-edge-primary px-6 py-4 flex items-center justify-between shadow-2xl"
           >
-            <span className="text-sm text-content-secondary">{t('artistOverlay.batch.selected', { count: selectedIds.size })}</span>
+            <span className="text-sm text-content-secondary">{t('groupOverlay.batch.selected', { count: selectedIds.size })}</span>
             <div className="flex items-center gap-3">
               <button
                 onClick={handleBatchDownload}
                 className="px-4 py-2 rounded-xl bg-surface-tertiary hover:bg-edge-secondary text-sm text-content-secondary hover:text-content-primary transition-all flex items-center gap-2 font-medium border border-transparent hover:border-edge-primary"
               >
                 <Download className="w-4 h-4" />
-                {t('artistOverlay.batch.download')}
+                {t('groupOverlay.batch.download')}
               </button>
               <button
                 onClick={handleBatchDelete}
@@ -660,14 +660,14 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
                 className="px-4 py-2 rounded-xl bg-danger hover:bg-danger-hover disabled:opacity-50 text-sm text-white shadow-lg shadow-danger/20 hover:shadow-danger/30 transition-all hover:scale-[1.02] flex items-center gap-2 font-medium"
               >
                 <Trash2 className="w-4 h-4" />
-                {batchDeleting ? t('artistOverlay.batch.deleting') : t('artistOverlay.batch.delete')}
+                {batchDeleting ? t('groupOverlay.batch.deleting') : t('groupOverlay.batch.delete')}
               </button>
               <button
                 onClick={() => { setSelectedIds(new Set()); setLastClickedId(null); }}
                 className="px-3 py-2 rounded-lg text-sm text-content-muted hover:text-content-secondary transition-colors flex items-center gap-1.5"
               >
                 <X className="w-4 h-4" />
-                {t('artistOverlay.batch.clear')}
+                {t('groupOverlay.batch.clear')}
               </button>
             </div>
           </motion.div>
@@ -694,10 +694,10 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
       {/* Confirm: set as cover */}
       {coverTarget && (
         <ConfirmModal
-          title={t('artistOverlay.setCover.title')}
-          message={t('artistOverlay.setCover.message', { filename: coverTarget.original_filename, artistName: artist.name })}
-          confirmText={t('artistOverlay.setCover.confirm')}
-          cancelText={t('artistOverlay.setCover.cancel')}
+          title={t('groupOverlay.setCover.title')}
+          message={t('groupOverlay.setCover.message', { filename: coverTarget.original_filename, groupName: group.name })}
+          confirmText={t('groupOverlay.setCover.confirm')}
+          cancelText={t('groupOverlay.setCover.cancel')}
           onConfirm={handleSetCoverConfirm}
           onCancel={() => setCoverTarget(null)}
         />
@@ -706,10 +706,10 @@ export default function ArtistOverlay({ artist, onClose, onArtistUpdated }) {
       {/* Confirm: delete illustration */}
       {deleteTarget && (
         <ConfirmModal
-          title={t('artistOverlay.deleteIllustration.title')}
-          message={t('artistOverlay.deleteIllustration.message', { filename: deleteTarget.original_filename })}
-          confirmText={t('artistOverlay.deleteIllustration.confirm')}
-          cancelText={t('artistOverlay.deleteIllustration.cancel')}
+          title={t('groupOverlay.deleteIllustration.title')}
+          message={t('groupOverlay.deleteIllustration.message', { filename: deleteTarget.original_filename })}
+          confirmText={t('groupOverlay.deleteIllustration.confirm')}
+          cancelText={t('groupOverlay.deleteIllustration.cancel')}
           danger
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteTarget(null)}

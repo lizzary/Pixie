@@ -11,56 +11,56 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-// ── Artists ────────────────────────────────────────────
+// ── Groups ────────────────────────────────────────────
 
-export function listArtists() {
-  return request('/api/artists');
+export function listGroups() {
+  return request('/api/groups');
 }
 
-export function createArtist(name) {
-  return request('/api/artists', {
+export function createGroup(name) {
+  return request('/api/groups', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   });
 }
 
-export function getArtist(artistId) {
-  return request(`/api/artists/${artistId}`);
+export function getGroup(groupId) {
+  return request(`/api/groups/${groupId}`);
 }
 
-export function updateArtist(artistId, data) {
-  return request(`/api/artists/${artistId}`, {
+export function updateGroup(groupId, data) {
+  return request(`/api/groups/${groupId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 }
 
-export function deleteArtist(artistId) {
-  return request(`/api/artists/${artistId}`, { method: 'DELETE' });
+export function deleteGroup(groupId) {
+  return request(`/api/groups/${groupId}`, { method: 'DELETE' });
 }
 
 // ── Illustrations ──────────────────────────────────────
 
-export function listIllustrations(artistId, offset = 0, limit = 200) {
-  return request(`/api/artists/${artistId}/illustrations?offset=${offset}&limit=${limit}`);
+export function listIllustrations(groupId, offset = 0, limit = 200) {
+  return request(`/api/groups/${groupId}/illustrations?offset=${offset}&limit=${limit}`);
 }
 
-export function uploadIllustrations(artistId, files) {
+export function uploadIllustrations(groupId, files) {
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
   return request(
-    `/api/artists/${artistId}/illustrations/upload`,
+    `/api/groups/${groupId}/illustrations/upload`,
     { method: 'POST', body: formData },
   );
 }
 
-export function uploadSingleIllustration(artistId, file) {
+export function uploadSingleIllustration(groupId, file) {
   const formData = new FormData();
   formData.append('files', file);
   return request(
-    `/api/artists/${artistId}/illustrations/upload`,
+    `/api/groups/${groupId}/illustrations/upload`,
     { method: 'POST', body: formData },
   );
 }

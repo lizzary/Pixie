@@ -278,10 +278,10 @@ export default function Lightbox({ illustrations, initialIndex, onClose, onDelet
                 <h3 className="text-sm font-semibold text-gray-300 mb-4">{t('lightbox.panel.heading')}</h3>
 
                 <div className="space-y-3">
-                  {/* Artist (always visible) */}
+                  {/* Group (always visible) */}
                   <div className="pb-3 border-b border-white/10">
-                    <span className="text-xs text-gray-500">{t('lightbox.panel.artist')}</span>
-                    <p className="text-sm text-gray-200">{currentIllustration.artist_name}</p>
+                    <span className="text-xs text-gray-500">{t('lightbox.panel.group')}</span>
+                    <p className="text-sm text-gray-200">{currentIllustration.group_name}</p>
                   </div>
 
                   {loadingMeta ? (

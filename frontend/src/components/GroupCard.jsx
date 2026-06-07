@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import { Trash2 } from 'lucide-react';
 import { useLocale } from '../contexts/LocaleContext';
 
-export default function ArtistCard({ artist, onClick, onDelete, quality = 'low' }) {
+export default function GroupCard({ group, onClick, onDelete, quality = 'low' }) {
   const { t } = useLocale();
   return (
     <motion.div
@@ -11,15 +11,15 @@ export default function ArtistCard({ artist, onClick, onDelete, quality = 'low' 
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      onClick={() => onClick(artist)}
+      onClick={() => onClick(group)}
       className="group relative bg-surface-secondary rounded-xl border border-edge-primary overflow-hidden cursor-pointer hover:border-accent/50 hover:shadow-lg hover:shadow-accent/10 transition-all duration-200"
     >
       {/* Cover image */}
       <div className="aspect-[4/5] bg-surface-tertiary flex items-center justify-center overflow-hidden">
-        {artist.cover_thumbnail_url ? (
+        {group.cover_thumbnail_url ? (
           <img
-            src={`http://localhost:8000${artist.cover_thumbnail_url}?quality=${quality}`}
-            alt={artist.name}
+            src={`http://localhost:8000${group.cover_thumbnail_url}?quality=${quality}`}
+            alt={group.name}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
@@ -28,25 +28,25 @@ export default function ArtistCard({ artist, onClick, onDelete, quality = 'low' 
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
             </svg>
-            <span className="text-xs">{t('artistCard.noCover')}</span>
+            <span className="text-xs">{t('groupCard.noCover')}</span>
           </div>
         )}
       </div>
 
       {/* Info */}
       <div className="p-3">
-        <h3 className="text-sm font-semibold text-content-primary truncate">{artist.name}</h3>
-        <p className="text-xs text-content-muted mt-0.5">{t('artistCard.illustrationCount', { count: artist.illustration_count })}</p>
+        <h3 className="text-sm font-semibold text-content-primary truncate">{group.name}</h3>
+        <p className="text-xs text-content-muted mt-0.5">{t('groupCard.illustrationCount', { count: group.illustration_count })}</p>
       </div>
 
       {/* Delete button */}
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onDelete(artist);
+          onDelete(group);
         }}
         className="absolute top-2 right-2 p-1.5 rounded-lg bg-overlay/60 text-content-tertiary hover:text-danger hover:bg-overlay/80 opacity-0 group-hover:opacity-100 transition-all"
-        title={t('artistCard.deleteTitle')}
+        title={t('groupCard.deleteTitle')}
       >
         <Trash2 className="w-4 h-4" />
       </button>

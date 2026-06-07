@@ -15,7 +15,7 @@ def get_db() -> sqlite3.Connection:
 def init_db() -> None:
     conn = get_db()
     conn.executescript("""
-        CREATE TABLE IF NOT EXISTS artists (
+        CREATE TABLE IF NOT EXISTS groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             cover_illustration_id INTEGER,
@@ -24,7 +24,7 @@ def init_db() -> None:
 
         CREATE TABLE IF NOT EXISTS illustrations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            artist_id INTEGER NOT NULL,
+            group_id INTEGER NOT NULL,
             filename TEXT NOT NULL,
             original_filename TEXT NOT NULL,
             file_size INTEGER NOT NULL DEFAULT 0,
@@ -34,7 +34,7 @@ def init_db() -> None:
             tags TEXT NOT NULL DEFAULT '',
             extended_data TEXT DEFAULT NULL,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            FOREIGN KEY (artist_id) REFERENCES artists(id) ON DELETE CASCADE
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS illustrations_fts USING fts5(
@@ -56,8 +56,8 @@ def init_db() -> None:
             INSERT INTO illustrations_fts(rowid, tags) VALUES (new.id, new.tags);
         END;
 
-        CREATE INDEX IF NOT EXISTS idx_illustrations_artist_id
-            ON illustrations(artist_id);
+        CREATE INDEX IF NOT EXISTS idx_illustrations_group_id
+            ON illustrations(group_id);
     """)
     conn.commit()
     conn.close()

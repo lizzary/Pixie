@@ -12,7 +12,7 @@ from PIL import Image, UnidentifiedImageError
 
 from database import get_db, init_db
 from models import (
-    ArtistCreate, ArtistUpdate, ArtistResponse,
+    GroupCreate, GroupUpdate, GroupResponse,
     IllustrationResponse, IllustrationUpdate,
     SearchResult, IllustrationListResult,
 )
@@ -65,8 +65,8 @@ THUMBNAIL_QUALITY_CONFIG = {
 }
 
 
-def _artist_upload_dir(artist_id: int) -> str:
-    p = os.path.join(UPLOADS_DIR, str(artist_id))
+def _group_upload_dir(group_id: int) -> str:
+    p = os.path.join(UPLOADS_DIR, str(group_id))
     os.makedirs(os.path.join(p, "originals"), exist_ok=True)
     os.makedirs(os.path.join(p, "thumbnails"), exist_ok=True)
     os.makedirs(os.path.join(p, "thumbnails_normal"), exist_ok=True)
@@ -79,8 +79,8 @@ def _build_cover_url(cover_id: Optional[int]) -> Optional[str]:
     return f"/api/illustrations/{cover_id}/thumbnail"
 
 
-def _row_to_artist(row) -> ArtistResponse:
-    return ArtistResponse(
+def _row_to_group(row) -> GroupResponse:
+    return GroupResponse(
         id=row["id"],
         name=row["name"],
         cover_illustration_id=row["cover_illustration_id"],
@@ -92,11 +92,11 @@ def _row_to_artist(row) -> ArtistResponse:
 
 def _row_to_illustration(row) -> IllustrationResponse:
     iid = row["id"]
-    aid = row["artist_id"]
+    gid = row["group_id"]
     return IllustrationResponse(
         id=iid,
-        artist_id=aid,
-        artist_name=row["artist_name"],
+        group_id=gid,
+        group_name=row["group_name"],
         filename=row["filename"],
         original_filename=row["original_filename"],
         file_size=row["file_size"],
@@ -111,34 +111,34 @@ def _row_to_illustration(row) -> IllustrationResponse:
     )
 
 
-# ── Artist routes ───────────────────────────────────────
+# ── Group routes ───────────────────────────────────────
 
-@app.get("/api/artists", response_model=list[ArtistResponse])
-def list_artists():
+@app.get("/api/groups", response_model=list[GroupResponse])
+def list_groups():
     conn = get_db()
     rows = conn.execute("""
-        SELECT a.*, COUNT(i.id) AS illustration_count
-        FROM artists a
-        LEFT JOIN illustrations i ON a.id = i.artist_id
-        GROUP BY a.id
-        ORDER BY a.created_at DESC
+        SELECT g.*, COUNT(i.id) AS illustration_count
+        FROM groups g
+        LEFT JOIN illustrations i ON g.id = i.group_id
+        GROUP BY g.id
+        ORDER BY g.created_at DESC
     """).fetchall()
     conn.close()
-    return [_row_to_artist(r) for r in rows]
+    return [_row_to_group(r) for r in rows]
 
 
-@app.post("/api/artists", response_model=ArtistResponse, status_code=201)
-def create_artist(body: ArtistCreate):
+@app.post("/api/groups", response_model=GroupResponse, status_code=201)
+def create_group(body: GroupCreate):
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO artists (name) VALUES (?)",
+        "INSERT INTO groups (name) VALUES (?)",
         (body.name,),
     )
     conn.commit()
-    artist_id = cur.lastrowid
-    row = conn.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
+    group_id = cur.lastrowid
+    row = conn.execute("SELECT * FROM groups WHERE id = ?", (group_id,)).fetchone()
     conn.close()
-    return ArtistResponse(
+    return GroupResponse(
         id=row["id"],
         name=row["name"],
         cover_illustration_id=None,
@@ -148,105 +148,105 @@ def create_artist(body: ArtistCreate):
     )
 
 
-@app.get("/api/artists/{artist_id}", response_model=ArtistResponse)
-def get_artist(artist_id: int):
+@app.get("/api/groups/{group_id}", response_model=GroupResponse)
+def get_group(group_id: int):
     conn = get_db()
     row = conn.execute("""
-        SELECT a.*, COUNT(i.id) AS illustration_count
-        FROM artists a
-        LEFT JOIN illustrations i ON a.id = i.artist_id
-        WHERE a.id = ?
-        GROUP BY a.id
-    """, (artist_id,)).fetchone()
+        SELECT g.*, COUNT(i.id) AS illustration_count
+        FROM groups g
+        LEFT JOIN illustrations i ON g.id = i.group_id
+        WHERE g.id = ?
+        GROUP BY g.id
+    """, (group_id,)).fetchone()
     conn.close()
     if row is None:
-        raise HTTPException(404, "Artist not found")
-    return _row_to_artist(row)
+        raise HTTPException(404, "Group not found")
+    return _row_to_group(row)
 
 
-@app.put("/api/artists/{artist_id}", response_model=ArtistResponse)
-def update_artist(artist_id: int, body: ArtistUpdate):
+@app.put("/api/groups/{group_id}", response_model=GroupResponse)
+def update_group(group_id: int, body: GroupUpdate):
     conn = get_db()
-    artist = conn.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
-    if artist is None:
+    group = conn.execute("SELECT * FROM groups WHERE id = ?", (group_id,)).fetchone()
+    if group is None:
         conn.close()
-        raise HTTPException(404, "Artist not found")
+        raise HTTPException(404, "Group not found")
 
     if body.name is not None:
-        conn.execute("UPDATE artists SET name = ? WHERE id = ?", (body.name, artist_id))
+        conn.execute("UPDATE groups SET name = ? WHERE id = ?", (body.name, group_id))
 
     if body.cover_illustration_id is not None:
         ill = conn.execute(
-            "SELECT id FROM illustrations WHERE id = ? AND artist_id = ?",
-            (body.cover_illustration_id, artist_id),
+            "SELECT id FROM illustrations WHERE id = ? AND group_id = ?",
+            (body.cover_illustration_id, group_id),
         ).fetchone()
         if ill is None:
             conn.close()
-            raise HTTPException(400, "Cover illustration must belong to this artist")
+            raise HTTPException(400, "Cover illustration must belong to this group")
         conn.execute(
-            "UPDATE artists SET cover_illustration_id = ? WHERE id = ?",
-            (body.cover_illustration_id, artist_id),
+            "UPDATE groups SET cover_illustration_id = ? WHERE id = ?",
+            (body.cover_illustration_id, group_id),
         )
 
     conn.commit()
     row = conn.execute("""
-        SELECT a.*, COUNT(i.id) AS illustration_count
-        FROM artists a
-        LEFT JOIN illustrations i ON a.id = i.artist_id
-        WHERE a.id = ?
-        GROUP BY a.id
-    """, (artist_id,)).fetchone()
+        SELECT g.*, COUNT(i.id) AS illustration_count
+        FROM groups g
+        LEFT JOIN illustrations i ON g.id = i.group_id
+        WHERE g.id = ?
+        GROUP BY g.id
+    """, (group_id,)).fetchone()
     conn.close()
-    return _row_to_artist(row)
+    return _row_to_group(row)
 
 
-@app.delete("/api/artists/{artist_id}", status_code=204)
-def delete_artist(artist_id: int):
+@app.delete("/api/groups/{group_id}", status_code=204)
+def delete_group(group_id: int):
     conn = get_db()
-    artist = conn.execute("SELECT id FROM artists WHERE id = ?", (artist_id,)).fetchone()
-    if artist is None:
+    group = conn.execute("SELECT id FROM groups WHERE id = ?", (group_id,)).fetchone()
+    if group is None:
         conn.close()
-        raise HTTPException(404, "Artist not found")
+        raise HTTPException(404, "Group not found")
 
     # Unset cover reference to avoid FK issues, then delete illustrations
-    conn.execute("UPDATE artists SET cover_illustration_id = NULL WHERE id = ?", (artist_id,))
-    conn.execute("DELETE FROM illustrations WHERE artist_id = ?", (artist_id,))
-    conn.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+    conn.execute("UPDATE groups SET cover_illustration_id = NULL WHERE id = ?", (group_id,))
+    conn.execute("DELETE FROM illustrations WHERE group_id = ?", (group_id,))
+    conn.execute("DELETE FROM groups WHERE id = ?", (group_id,))
     conn.commit()
     conn.close()
 
     # Remove uploaded files
-    artist_dir = os.path.join(UPLOADS_DIR, str(artist_id))
-    if os.path.isdir(artist_dir):
-        shutil.rmtree(artist_dir)
+    group_dir = os.path.join(UPLOADS_DIR, str(group_id))
+    if os.path.isdir(group_dir):
+        shutil.rmtree(group_dir)
 
 
 # ── Illustration routes ─────────────────────────────────
 
-@app.get("/api/artists/{artist_id}/illustrations", response_model=IllustrationListResult)
+@app.get("/api/groups/{group_id}/illustrations", response_model=IllustrationListResult)
 def list_illustrations(
-    artist_id: int,
+    group_id: int,
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100000),
 ):
     conn = get_db()
-    artist = conn.execute("SELECT id, name FROM artists WHERE id = ?", (artist_id,)).fetchone()
-    if artist is None:
+    group = conn.execute("SELECT id, name FROM groups WHERE id = ?", (group_id,)).fetchone()
+    if group is None:
         conn.close()
-        raise HTTPException(404, "Artist not found")
+        raise HTTPException(404, "Group not found")
 
     total = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM illustrations WHERE artist_id = ?",
-        (artist_id,),
+        "SELECT COUNT(*) AS cnt FROM illustrations WHERE group_id = ?",
+        (group_id,),
     ).fetchone()["cnt"]
 
     rows = conn.execute("""
-        SELECT i.*, ? AS artist_name
+        SELECT i.*, ? AS group_name
         FROM illustrations i
-        WHERE i.artist_id = ?
+        WHERE i.group_id = ?
         ORDER BY i.created_at DESC
         LIMIT ? OFFSET ?
-    """, (artist["name"], artist_id, limit, offset)).fetchall()
+    """, (group["name"], group_id, limit, offset)).fetchall()
     conn.close()
 
     return {
@@ -257,19 +257,19 @@ def list_illustrations(
     }
 
 
-@app.post("/api/artists/{artist_id}/illustrations/upload", response_model=list[IllustrationResponse], status_code=201)
+@app.post("/api/groups/{group_id}/illustrations/upload", response_model=list[IllustrationResponse], status_code=201)
 def upload_illustrations(
-    artist_id: int,
+    group_id: int,
     files: list[UploadFile] = File(...),
 ):
     conn = get_db()
-    artist = conn.execute("SELECT id, name FROM artists WHERE id = ?", (artist_id,)).fetchone()
-    if artist is None:
+    group = conn.execute("SELECT id, name FROM groups WHERE id = ?", (group_id,)).fetchone()
+    if group is None:
         conn.close()
-        raise HTTPException(404, "Artist not found")
+        raise HTTPException(404, "Group not found")
     conn.close()
 
-    _artist_upload_dir(artist_id)
+    _group_upload_dir(group_id)
     results: list[IllustrationResponse] = []
 
     for upload in files:
@@ -296,11 +296,11 @@ def upload_illustrations(
             conn = get_db()
             cur = conn.execute(
                 """INSERT INTO illustrations
-                   (artist_id, filename, original_filename, file_size, width, height,
+                   (group_id, filename, original_filename, file_size, width, height,
                     mime_type, tags, extended_data)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    artist_id,
+                    group_id,
                     "",  # placeholder, set after we know the id
                     safe_filename,
                     len(contents),
@@ -315,12 +315,12 @@ def upload_illustrations(
             disk_filename = f"{ill_id}_{safe_filename}"
 
             # Write files to disk (needed for metadata extraction)
-            originals_dir = os.path.join(UPLOADS_DIR, str(artist_id), "originals")
+            originals_dir = os.path.join(UPLOADS_DIR, str(group_id), "originals")
 
             # Generate thumbnails at both quality levels
             for quality, cfg in THUMBNAIL_QUALITY_CONFIG.items():
                 thumb = create_thumbnail(image, max_size=cfg["max_size"])
-                thumb_dir = os.path.join(UPLOADS_DIR, str(artist_id), cfg["dir"])
+                thumb_dir = os.path.join(UPLOADS_DIR, str(group_id), cfg["dir"])
                 thumb.save(os.path.join(thumb_dir, disk_filename), format="JPEG",
                            quality=cfg["jpeg_quality"])
 
@@ -341,8 +341,8 @@ def upload_illustrations(
             conn.commit()
 
             row = conn.execute(
-                "SELECT i.*, ? AS artist_name FROM illustrations i WHERE i.id = ?",
-                (artist["name"], ill_id),
+                "SELECT i.*, ? AS group_name FROM illustrations i WHERE i.id = ?",
+                (group["name"], ill_id),
             ).fetchone()
             conn.close()
 
@@ -360,9 +360,9 @@ def upload_illustrations(
 def get_illustration(illustration_id: int):
     conn = get_db()
     row = conn.execute("""
-        SELECT i.*, a.name AS artist_name
+        SELECT i.*, g.name AS group_name
         FROM illustrations i
-        JOIN artists a ON i.artist_id = a.id
+        JOIN groups g ON i.group_id = g.id
         WHERE i.id = ?
     """, (illustration_id,)).fetchone()
     conn.close()
@@ -375,14 +375,14 @@ def get_illustration(illustration_id: int):
 def serve_illustration_file(illustration_id: int, download: bool = Query(False)):
     conn = get_db()
     row = conn.execute(
-        "SELECT filename, artist_id, mime_type, original_filename FROM illustrations WHERE id = ?",
+        "SELECT filename, group_id, mime_type, original_filename FROM illustrations WHERE id = ?",
         (illustration_id,),
     ).fetchone()
     conn.close()
     if row is None:
         raise HTTPException(404, "Illustration not found")
 
-    filepath = os.path.join(UPLOADS_DIR, str(row["artist_id"]), "originals", row["filename"])
+    filepath = os.path.join(UPLOADS_DIR, str(row["group_id"]), "originals", row["filename"])
     if not os.path.isfile(filepath):
         raise HTTPException(404, "File not found on disk")
 
@@ -399,30 +399,30 @@ def serve_illustration_thumbnail(illustration_id: int, quality: str = "low"):
 
     conn = get_db()
     row = conn.execute(
-        "SELECT filename, artist_id, mime_type FROM illustrations WHERE id = ?",
+        "SELECT filename, group_id, mime_type FROM illustrations WHERE id = ?",
         (illustration_id,),
     ).fetchone()
     conn.close()
     if row is None:
         raise HTTPException(404, "Illustration not found")
 
-    artist_dir = os.path.join(UPLOADS_DIR, str(row["artist_id"]))
+    group_dir = os.path.join(UPLOADS_DIR, str(row["group_id"]))
     filename = row["filename"]
 
     # Original quality — serve the original file directly
     if quality == "original":
-        filepath = os.path.join(artist_dir, "originals", filename)
+        filepath = os.path.join(group_dir, "originals", filename)
         if not os.path.isfile(filepath):
             raise HTTPException(404, "Original file not found on disk")
         return FileResponse(filepath, media_type=row["mime_type"])
 
     cfg = THUMBNAIL_QUALITY_CONFIG[quality]
-    thumb_dir = os.path.join(artist_dir, cfg["dir"])
+    thumb_dir = os.path.join(group_dir, cfg["dir"])
     filepath = os.path.join(thumb_dir, filename)
 
     # Generate on-the-fly for pre-existing illustrations without this quality level
     if not os.path.isfile(filepath):
-        original_path = os.path.join(artist_dir, "originals", filename)
+        original_path = os.path.join(group_dir, "originals", filename)
         if not os.path.isfile(original_path):
             raise HTTPException(404, "Original file not found — cannot generate thumbnail")
         try:
@@ -440,14 +440,14 @@ def serve_illustration_thumbnail(illustration_id: int, quality: str = "low"):
 @app.delete("/api/illustrations/{illustration_id}", status_code=204)
 def delete_illustration(illustration_id: int):
     conn = get_db()
-    row = conn.execute("SELECT id, filename, artist_id FROM illustrations WHERE id = ?", (illustration_id,)).fetchone()
+    row = conn.execute("SELECT id, filename, group_id FROM illustrations WHERE id = ?", (illustration_id,)).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(404, "Illustration not found")
 
     # Unset as cover if it is one
     conn.execute(
-        "UPDATE artists SET cover_illustration_id = NULL WHERE cover_illustration_id = ?",
+        "UPDATE groups SET cover_illustration_id = NULL WHERE cover_illustration_id = ?",
         (illustration_id,),
     )
     conn.execute("DELETE FROM illustrations WHERE id = ?", (illustration_id,))
@@ -455,9 +455,9 @@ def delete_illustration(illustration_id: int):
     conn.close()
 
     # Delete files
-    artist_dir = os.path.join(UPLOADS_DIR, str(row["artist_id"]))
+    group_dir = os.path.join(UPLOADS_DIR, str(row["group_id"]))
     for sub in ("originals", "thumbnails", "thumbnails_normal"):
-        fp = os.path.join(artist_dir, sub, row["filename"])
+        fp = os.path.join(group_dir, sub, row["filename"])
         if os.path.isfile(fp):
             os.remove(fp)
 
@@ -466,7 +466,7 @@ def delete_illustration(illustration_id: int):
 def update_illustration(illustration_id: int, body: IllustrationUpdate):
     conn = get_db()
     row = conn.execute(
-        "SELECT i.*, a.name AS artist_name FROM illustrations i JOIN artists a ON i.artist_id = a.id WHERE i.id = ?",
+        "SELECT i.*, g.name AS group_name FROM illustrations i JOIN groups g ON i.group_id = g.id WHERE i.id = ?",
         (illustration_id,),
     ).fetchone()
     if row is None:
@@ -481,7 +481,7 @@ def update_illustration(illustration_id: int, body: IllustrationUpdate):
         conn.commit()
 
     row = conn.execute(
-        "SELECT i.*, a.name AS artist_name FROM illustrations i JOIN artists a ON i.artist_id = a.id WHERE i.id = ?",
+        "SELECT i.*, g.name AS group_name FROM illustrations i JOIN groups g ON i.group_id = g.id WHERE i.id = ?",
         (illustration_id,),
     ).fetchone()
     conn.close()
@@ -532,10 +532,10 @@ def search_illustrations(
         total = count_row["cnt"]
 
         rows = conn.execute("""
-            SELECT i.*, a.name AS artist_name
+            SELECT i.*, g.name AS group_name
             FROM illustrations_fts fts
             JOIN illustrations i ON fts.rowid = i.id
-            JOIN artists a ON i.artist_id = a.id
+            JOIN groups g ON i.group_id = g.id
             WHERE illustrations_fts MATCH ?
             ORDER BY rank
             LIMIT ? OFFSET ?
