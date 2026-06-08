@@ -52,7 +52,7 @@ Images generated through ComfyUI embed rich metadata — Gallery reads it all. F
 All metadata is viewable in the Lightbox details panel (press `Ctrl+D` to toggle).
 
 <!-- Screenshot: placeholder for lightbox with metadata panel open -->
-<!-- ![ComfyUI Metadata](readme/access/lightbox_metadata.png) -->
+![ComfyUI Metadata](readme/access/lightbox_metadata.png)
 
 ### Custom Tag Editing
 
@@ -61,7 +61,7 @@ Tags aren't just read-only — you can edit them. In the Lightbox details panel,
 Custom tags you add are immediately discoverable through the global search, the tags browser, and the in-page filter — they integrate seamlessly with every tag-aware feature.
 
 <!-- Screenshot: placeholder for tag editing in lightbox -->
-<!-- ![Custom Tag Editing](readme/access/lightbox_tag_edit.png) -->
+![Custom Tag Editing](readme/access/lightbox_tag_edit.png)
 
 ### Mutually Exclusive Color Grouping (Visual Clustering)
 
@@ -71,28 +71,30 @@ Each group gets a distinct color, and groups are rendered as **collapsible color
 
 - **Tag-based groups**: match against illustration tags (auto-generated or custom)
 - **Prompt-based groups**: match against the Positive and Negative Prompt text extracted from ComfyUI metadata
+- 
+<!-- Screenshot: placeholder for color grouping in action -->
+![Color Grouping](readme/access/color_groups1.png)
+
+![Color Grouping](readme/access/color_groups2.png)
 
 You can switch between multiple saved grouping configurations (sets), each with its own independent group definitions.
 
-<!-- Screenshot: placeholder for color grouping in action -->
-<!-- ![Color Grouping](readme/access/color_groups.png) -->
-
 <!-- Screenshot: placeholder for group configuration modal -->
-<!-- ![Group Configuration](readme/access/group_config_modal.png) -->
+![Group Configuration](readme/access/group_config_modal.png)
 
 ### Tags & Prompts Browsers
 
 Dedicated pages (`/tags` and `/prompts`) list every unique tag and prompt term in your library. Browse them as filterable chips — click any tag to see how many illustrations carry it, or type to narrow the list. A great way to explore your collection's vocabulary.
 
 <!-- Screenshot: placeholder for tags page -->
-<!-- ![Tags Browser](readme/access/tags_page.png) -->
+![Tags Browser](readme/access/tags_page.png)
 
 ### Group Management
 
 Organize illustrations into **Groups** (think of them as albums or projects). Each group can have a cover illustration and shows a live count of its contents. Create, rename, or delete groups — deleting a group cascades to remove all its illustrations and files.
 
 <!-- Screenshot: placeholder for home page with group grid -->
-<!-- ![Group Grid](readme/access/home_groups.png) -->
+![Group Grid](readme/access/home_groups.png)
 
 ### Multi-Select & Batch Operations
 
@@ -104,14 +106,14 @@ Select illustrations using familiar keyboard shortcuts:
 Once selected, batch **download** (with customizable file naming) or batch **delete** in one action.
 
 <!-- Screenshot: placeholder for batch selection -->
-<!-- ![Batch Selection](readme/access/batch_selection.png) -->
+![Batch Selection](readme/access/batch_selection.png)
 
 ### Custom Download Naming
 
 Configure how downloaded files are named using a flexible template system. Insert placeholders like `<Model>`, `<Seed>`, `<Steps>`, `<Sampler>`, `<Resolution>`, `<Date>`, `<Group>`, and more — they are replaced with actual values from each illustration's data and metadata when downloading.
 
 <!-- Screenshot: placeholder for download naming format settings -->
-<!-- ![Download Naming](readme/access/settings_download.png) -->
+![Download Naming](readme/access/settings_download.png)
 
 ### Multi-Quality Thumbnails
 
@@ -130,7 +132,7 @@ Thumbnails are generated on upload. Missing quality levels for pre-existing imag
 Click any illustration to open the full-screen Lightbox. Navigate with arrow keys, toggle the details panel (`Ctrl+D`) to see file info, ComfyUI metadata, and tags. Set the current image as the group cover or delete it directly.
 
 <!-- Screenshot: placeholder for lightbox view -->
-<!-- ![Lightbox](readme/access/lightbox.png) -->
+![ComfyUI Metadata](readme/access/lightbox_metadata.png)
 
 ### Sort, Filter & Pagination
 
@@ -147,69 +149,7 @@ Upload multiple images at once — they are processed one by one with a live pro
 
 Switch between dark and light color schemes with a single click. Your preference is persisted across sessions. Both themes are carefully designed with semantic color tokens for consistent, readable interfaces.
 
-<!-- Screenshot: placeholder for dark mode -->
-<!-- ![Dark Mode](readme/access/dark_mode.png) -->
-
-<!-- Screenshot: placeholder for light mode -->
-<!-- ![Light Mode](readme/access/light_mode.png) -->
-
 ### Internationalization (i18n)
 
 Built-in support for **English** and **中文 (Chinese)**. All user-facing text is keyed through the translation system. Switch languages in Settings — the change applies instantly without a page reload.
 
----
-
-## Quick Start
-
-### Prerequisites
-
-- **Python 3.10+** with `pip`
-- **Node.js 18+** with `npm`
-- (Optional) NVIDIA GPU with CUDA for accelerated AI tagging
-
-### Development Mode (Two Servers)
-
-```bash
-# Terminal 1 — Backend
-cd backend
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # Linux / macOS
-pip install -r requirements.txt
-python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-
-# Terminal 2 — Frontend
-cd frontend
-npm install
-npm start                    # Starts on http://localhost:3000
-```
-
-- **Backend** → `http://localhost:8000` (Swagger docs at `/docs`)
-- **Frontend** → `http://localhost:3000`
-
-### Production Mode (Single Server)
-
-```bash
-cd frontend && npm run build   # Produces build/ directory
-cd ../backend
-python -m uvicorn main:app --host 127.0.0.1 --port 8000
-# Visit http://127.0.0.1:8000 — both frontend and API served from one origin
-```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Backend** | Python, FastAPI, SQLite (with FTS5) |
-| **AI Tagging** | PyTorch, timm, HuggingFace Hub |
-| **Frontend** | React 19, Tailwind CSS 3, Framer Motion, Lucide React |
-| **Routing** | React Router v7 |
-| **Image Processing** | Pillow (PIL) |
-
----
-
-## License
-
-[MIT](LICENSE)
