@@ -1,8 +1,10 @@
 import { AnimatePresence } from 'framer-motion';
 import { useLocale } from '../contexts/LocaleContext';
+import { getCardSizeGrid } from '../hooks/useCardSize';
 
-export default function ColorGroup({ group, collapsed, onToggle, children }) {
+export default function ColorGroup({ group, collapsed, onToggle, children, cardSize = 3 }) {
   const { t } = useLocale();
+  const gridClass = getCardSizeGrid(cardSize);
   return (
     <div
       className="rounded-xl mb-5 overflow-hidden border"
@@ -29,7 +31,7 @@ export default function ColorGroup({ group, collapsed, onToggle, children }) {
       </button>
       {!collapsed && (
         <div className="px-4 pb-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <div className={`grid ${gridClass} gap-4`}>
             <AnimatePresence mode="popLayout">
               {children}
             </AnimatePresence>

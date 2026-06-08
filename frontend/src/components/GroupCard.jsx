@@ -46,7 +46,7 @@ export default function GroupCard({ group, onClick, onDelete, onRename, quality 
             e.stopPropagation();
             onRename(group);
           }}
-          className="p-1.5 rounded-lg bg-overlay/60 text-content-tertiary hover:text-accent hover:bg-overlay/80 transition-all"
+          className="p-1.5 rounded-lg bg-overlay/60 text-white/80 hover:text-accent hover:bg-overlay/80 transition-all"
           title={t('groupCard.renameTitle')}
         >
           <Pencil className="w-3.5 h-3.5" />
@@ -56,7 +56,7 @@ export default function GroupCard({ group, onClick, onDelete, onRename, quality 
             e.stopPropagation();
             onDelete(group);
           }}
-          className="p-1.5 rounded-lg bg-overlay/60 text-content-tertiary hover:text-danger hover:bg-overlay/80 transition-all"
+          className="p-1.5 rounded-lg bg-overlay/60 text-white/80 hover:text-danger hover:bg-overlay/80 transition-all"
           title={t('groupCard.deleteTitle')}
         >
           <Trash2 className="w-3.5 h-3.5" />

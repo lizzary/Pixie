@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, Settings, Download, Trash2, X, Monitor } from 'lucide-react';
 import useQuality from '../hooks/useQuality';
+import useCardSize, { CARD_SIZE_MIN, CARD_SIZE_MAX } from '../hooks/useCardSize';
 import useDownloadConfig, { resolveFilename } from '../hooks/useDownloadConfig';
 import { searchIllustrations, deleteIllustration } from '../api';
 import { useToast } from './Toast';
@@ -37,6 +38,7 @@ export default function SearchOverlay({ query, onClose }) {
   const [filterScope, setFilterScope] = useState('all');
   const { addToast } = useToast();
   const [quality, setQuality] = useQuality();
+  const [cardSize, setCardSize, cardSizeGrid] = useCardSize();
   const { format } = useDownloadConfig();
   const { t } = useLocale();
 
@@ -331,6 +333,22 @@ export default function SearchOverlay({ query, onClose }) {
               value={quality}
               onChange={setQuality}
             />
+
+            {/* Card size slider */}
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-tertiary border border-edge-secondary">
+              <span className="text-xs text-content-muted whitespace-nowrap">{t('searchOverlay.cardSize.label')}</span>
+              <input
+                type="range"
+                min={CARD_SIZE_MIN}
+                max={CARD_SIZE_MAX}
+                value={cardSize}
+                onChange={(e) => setCardSize(Number(e.target.value))}
+                className="w-20 h-1.5 rounded-full appearance-none bg-edge-secondary cursor-pointer
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110
+                  [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer
+                  accent-accent"
+              />
+            </div>
           </div>
         </div>
 
@@ -356,6 +374,7 @@ export default function SearchOverlay({ query, onClose }) {
                   group={group}
                   collapsed={collapsedGroups.has(group.id)}
                   onToggle={() => toggleGroupCollapse(group.id)}
+                  cardSize={cardSize}
                 >
                   {group.items.map((ill) => (
                     <IllustrationCard {...cardProps(ill)} />
@@ -365,7 +384,7 @@ export default function SearchOverlay({ query, onClose }) {
             </div>
           ) : (
             /* Flat grid */
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            <div className={`grid ${cardSizeGrid} gap-4`}>
               <AnimatePresence mode="popLayout">
                 {filteredItems.map((ill) => (
                   <IllustrationCard {...cardProps(ill)} />
