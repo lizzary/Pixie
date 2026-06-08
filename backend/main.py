@@ -16,7 +16,7 @@ from models import (
     IllustrationResponse, IllustrationUpdate,
     SearchResult, IllustrationListResult,
 )
-from utils import extract_metadata, extract_tags, create_thumbnail, get_image_info, set_use_gpu, is_model_cached, download_model
+from utils import extract_metadata, extract_tags, create_thumbnail, get_image_info, set_use_gpu, is_model_cached, download_model, list_available_models, set_model_repo, get_model_repo, MODELS_DIR, _dirname_to_repo
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -36,9 +36,11 @@ def save_settings(data):
         json.dump(data, f, indent=2)
 
 
-# Apply GPU setting on startup
+# Apply GPU and model settings on startup
 _settings = load_settings()
 set_use_gpu(_settings.get("gpu_enabled", False))
+if _settings.get("tagger_model"):
+    set_model_repo(_settings["tagger_model"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -621,14 +623,76 @@ def get_settings():
 @app.put("/api/settings")
 def update_settings(body: dict):
     current = load_settings()
-    allowed = {"auto_tag", "gpu_enabled"}
+    allowed = {"auto_tag", "gpu_enabled", "tagger_model"}
     for key in body:
         if key in allowed:
-            current[key] = bool(body[key])
+            if key == "tagger_model":
+                current[key] = str(body[key]) if body[key] else ""
+            else:
+                current[key] = bool(body[key])
     save_settings(current)
-    # Apply GPU setting immediately
+    # Apply settings immediately
     set_use_gpu(current.get("gpu_enabled", False))
+    if current.get("tagger_model"):
+        set_model_repo(current["tagger_model"])
     return current
+
+
+# ── Model management ─────────────────────────────────────
+
+@app.get("/api/models")
+def list_models():
+    """List available tagger model directories and files in the models folder."""
+    models = list_available_models()
+    current_repo = get_model_repo()
+    return {"models": models, "active_repo": current_repo}
+
+
+@app.post("/api/models/upload", status_code=201)
+async def upload_model(file: UploadFile = File(...)):
+    """Upload a model file to the models folder."""
+    if not file.filename:
+        raise HTTPException(400, "No file provided")
+    safe_name = os.path.basename(file.filename)
+    if not safe_name:
+        raise HTTPException(400, "Invalid filename")
+    dest = os.path.join(MODELS_DIR, safe_name)
+    if os.path.exists(dest):
+        raise HTTPException(409, f"File '{safe_name}' already exists")
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    contents = await file.read()
+    with open(dest, "wb") as f:
+        f.write(contents)
+    ext = os.path.splitext(safe_name)[1].lower()
+    return {"name": safe_name, "type": "file", "size": os.path.getsize(dest)}
+
+
+@app.delete("/api/models/{model_name:path}")
+def delete_model(model_name: str):
+    """Delete a model directory or file from the models folder."""
+    safe_name = os.path.basename(model_name)
+    if not safe_name or safe_name == "CACHEDIR.TAG":
+        raise HTTPException(400, "Invalid model name")
+    target = os.path.join(MODELS_DIR, safe_name)
+    if not os.path.exists(target):
+        raise HTTPException(404, "Model not found")
+    if not os.path.realpath(target).startswith(os.path.realpath(MODELS_DIR)):
+        raise HTTPException(400, "Path traversal denied")
+    try:
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to delete: {exc}")
+    # If the deleted model was the active one, reset to default
+    current_repo = get_model_repo()
+    if _dirname_to_repo(safe_name) == current_repo:
+        set_model_repo("SmilingWolf/wd-eva02-large-tagger-v3")
+        current = load_settings()
+        current["tagger_model"] = ""
+        save_settings(current)
+    return {"status": "deleted"}
 
 
 # ── Frontend static files (catch-all must be last) ────────

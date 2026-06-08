@@ -24,8 +24,59 @@ from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
 
 # ── Tagger constants ──────────────────────────────────────────────────────────
-MODEL_REPO = "SmilingWolf/wd-eva02-large-tagger-v3"
+DEFAULT_MODEL_REPO = "SmilingWolf/wd-eva02-large-tagger-v3"
 LABELS_FILE = "selected_tags.csv"
+
+# Active model repo — can be changed via set_model_repo()
+_model_repo = DEFAULT_MODEL_REPO
+
+
+def set_model_repo(repo: str):
+    """Set the active tagger model repo and reset cached model if changed."""
+    global _model_repo, _tagger_model
+    if repo and repo != _model_repo:
+        _model_repo = repo
+        _tagger_model = None
+        logger.info("Model repo changed to %s, tagger will reload on next extraction", repo)
+
+
+def get_model_repo() -> str:
+    return _model_repo
+
+
+def _repo_to_dirname(repo: str) -> str:
+    """Convert HuggingFace repo ID to cache directory name."""
+    return "models--" + repo.replace("/", "--")
+
+
+def _dirname_to_repo(dirname: str) -> str:
+    """Convert cache directory name to HuggingFace repo ID."""
+    if dirname.startswith("models--"):
+        return dirname[len("models--"):].replace("--", "/", 1)
+    return dirname
+
+
+def list_available_models() -> list[dict]:
+    """List tagger model directories and model files in MODELS_DIR."""
+    models = []
+    if not os.path.isdir(MODELS_DIR):
+        return models
+    for entry in sorted(os.listdir(MODELS_DIR)):
+        if entry == "CACHEDIR.TAG":
+            continue
+        entry_path = os.path.join(MODELS_DIR, entry)
+        if os.path.isdir(entry_path) and entry.startswith("models--"):
+            # Check it has actual model content
+            for sub in ("blobs", "snapshots", "refs"):
+                sub_path = os.path.join(entry_path, sub)
+                if os.path.isdir(sub_path) and os.listdir(sub_path):
+                    models.append({"name": entry, "type": "huggingface", "repo": _dirname_to_repo(entry)})
+                    break
+        elif os.path.isfile(entry_path):
+            ext = os.path.splitext(entry)[1].lower()
+            if ext in (".pth", ".pt", ".bin", ".safetensors", ".ckpt", ".onnx"):
+                models.append({"name": entry, "type": "file", "size": os.path.getsize(entry_path)})
+    return models
 
 RATING_CATEGORY = 9
 GENERAL_CATEGORY = 0
@@ -54,15 +105,16 @@ def set_use_gpu(enabled: bool):
         _tagger_model = None
 
 
-def is_model_cached() -> bool:
-    """Check whether the WD-EVA02 tagger model has been downloaded to the local cache."""
-    model_cache_dir = os.path.join(MODELS_DIR, "models--SmilingWolf--wd-eva02-large-tagger-v3")
+def is_model_cached(repo: str = None) -> bool:
+    """Check whether a tagger model has been downloaded to the local cache."""
+    if repo is None:
+        repo = _model_repo
+    model_cache_dir = os.path.join(MODELS_DIR, _repo_to_dirname(repo))
     if not os.path.isdir(model_cache_dir):
         return False
     blobs_dir = os.path.join(model_cache_dir, "blobs")
     if os.path.isdir(blobs_dir) and os.listdir(blobs_dir):
         return True
-    # Also check under the old-style cache layout (snapshots / refs)
     for sub in ("snapshots", "refs"):
         d = os.path.join(model_cache_dir, sub)
         if os.path.isdir(d) and os.listdir(d):
@@ -89,14 +141,14 @@ def _load_tagger():
     if _use_gpu and not torch.cuda.is_available():
         logger.warning("GPU enabled but CUDA not available, falling back to CPU")
 
-    logger.info("Loading WD EVA02-Large Tagger v3 on %s (first call downloads ~800MB weights)...", device)
-    model = timm.create_model(f"hf_hub:{MODEL_REPO}", pretrained=True)
+    logger.info("Loading tagger model %s on %s (first call downloads weights)...", _model_repo, device)
+    model = timm.create_model(f"hf_hub:{_model_repo}", pretrained=True)
     model.eval()
     _tagger_model = model.to(device)
 
     logger.info("Downloading tag labels...")
     labels_path = hf_hub_download(
-        repo_id=MODEL_REPO,
+        repo_id=_model_repo,
         filename=LABELS_FILE,
         cache_dir=MODELS_DIR,
     )

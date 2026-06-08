@@ -113,3 +113,20 @@ export function checkModelStatus() {
 export function downloadModel() {
   return request('/api/model/download', { method: 'POST' });
 }
+
+export function listModels() {
+  return request('/api/models');
+}
+
+export function uploadModel(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request('/api/models/upload', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export function deleteModel(modelName) {
+  return request(`/api/models/${encodeURIComponent(modelName)}`, { method: 'DELETE' });
+}
