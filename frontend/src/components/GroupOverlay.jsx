@@ -700,34 +700,10 @@ export default function GroupOverlay({ group, onClose, onGroupUpdated }) {
           )}
         </div>
 
-        {/* Pagination — bottom */}
-        {!loading && totalCount > 0 && (
-          <div className="flex items-center justify-center gap-3 mt-6 mb-2">
-            <button
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage <= 1}
-              className="px-3 py-1.5 rounded-lg hover:bg-surface-tertiary text-content-tertiary hover:text-content-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm flex items-center gap-1"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              {t('groupOverlay.pagination.prev')}
-            </button>
-            <span className="text-sm text-content-secondary">
-              {currentPage} / {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage >= totalPages}
-              className="px-3 py-1.5 rounded-lg hover:bg-surface-tertiary text-content-tertiary hover:text-content-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm flex items-center gap-1"
-            >
-              {t('groupOverlay.pagination.next')}
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
 
         {/* Key hints */}
         {selectedIds.size === 0 && illustrations.length > 0 && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] px-4 py-2 rounded-lg bg-overlay/50 backdrop-blur text-xs text-content-muted flex items-center gap-3 select-none">
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] px-4 py-2 rounded-lg bg-surface-secondary/85 backdrop-blur border border-edge-primary/60 shadow-lg text-xs text-content-secondary flex items-center gap-3 select-none">
             <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Click</kbd> {t('groupOverlay.keyHints.click')}</span>
             <span className="text-content-muted/50">|</span>
             <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Ctrl+Click</kbd> {t('groupOverlay.keyHints.ctrlClick')}</span>

@@ -396,7 +396,7 @@ export default function SearchOverlay({ query, onClose }) {
 
         {/* Key hints */}
         {selectedIds.size === 0 && items.length > 0 && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] px-4 py-2 rounded-lg bg-overlay/50 backdrop-blur text-xs text-content-muted flex items-center gap-3 select-none">
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] px-4 py-2 rounded-lg bg-surface-secondary/85 backdrop-blur border border-edge-primary/60 shadow-lg text-xs text-content-secondary flex items-center gap-3 select-none">
             <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Ctrl+Click</kbd> {t('searchOverlay.keyHints.ctrlClick')}</span>
             <span className="text-content-muted/50">|</span>
             <span><kbd className="px-1 py-0.5 rounded bg-edge-subtle/10 text-content-tertiary text-[10px] font-mono">Shift+Click</kbd> {t('searchOverlay.keyHints.shiftClick')}</span>
