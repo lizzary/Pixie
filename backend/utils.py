@@ -906,6 +906,15 @@ def extract_tags(image: Image.Image) -> str:
 def create_thumbnail(image: Image.Image, max_size: int = 400) -> Image.Image:
     """Create a thumbnail copy, maintaining aspect ratio."""
     thumb = image.copy()
+
+    # JPEG does not support alpha — composite onto white background
+    if thumb.mode == "RGBA":
+        canvas = Image.new("RGBA", thumb.size, (255, 255, 255, 255))
+        canvas.paste(thumb, mask=thumb.split()[3])
+        thumb = canvas.convert("RGB")
+    elif thumb.mode != "RGB":
+        thumb = thumb.convert("RGB")
+
     thumb.thumbnail((max_size, max_size), Image.LANCZOS)
     return thumb
 
