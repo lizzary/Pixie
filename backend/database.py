@@ -1,7 +1,12 @@
 import sqlite3
 import os
+import sys
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gallery.db")
+DB_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    DB_DIR = os.path.dirname(sys.executable)
+
+DB_PATH = os.path.join(DB_DIR, "gallery.db")
 
 
 def get_db() -> sqlite3.Connection:

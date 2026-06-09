@@ -1,4 +1,5 @@
 import os
+import sys as _sys
 import json
 import shutil
 from contextlib import asynccontextmanager
@@ -19,6 +20,8 @@ from models import (
 from utils import extract_metadata, extract_tags, create_thumbnail, get_image_info, set_use_gpu, is_model_cached, download_model, list_available_models, set_active_model, get_active_model, USER_MODEL_DIR
 
 BASE_DIR:str = os.path.dirname(os.path.abspath(__file__))
+if getattr(_sys, "frozen", False):
+    BASE_DIR = os.path.dirname(_sys.executable)
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 
@@ -693,7 +696,12 @@ def delete_model(model_name: str):
 
 # ── Frontend static files (catch-all must be last) ────────
 
-FRONTEND_BUILD = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend", "build"))
+if getattr(_sys, "frozen", False):
+    # PyInstaller onedir: frontend bundled in _internal/frontend
+    _exe_dir = os.path.dirname(_sys.executable)
+    FRONTEND_BUILD = os.path.join(_exe_dir, "_internal", "frontend")
+else:
+    FRONTEND_BUILD = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend", "build"))
 
 if os.path.isdir(FRONTEND_BUILD):
     @app.get("/{full_path:path}")
@@ -705,5 +713,10 @@ if os.path.isdir(FRONTEND_BUILD):
 
 
 if __name__ == "__main__":
+    import sys
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    # PyInstaller bundles the app — use the object directly, no reload
+    if getattr(sys, "frozen", False):
+        uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
+    else:
+        uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

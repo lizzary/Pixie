@@ -10,15 +10,22 @@ from PIL.JpegImagePlugin import JpegImageFile
 logger = logging.getLogger(__name__)
 
 # ── Model directories ────────────────────────────────────────────────────────
-MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+import sys as _sys
+
+if getattr(_sys, "frozen", False):
+    # PyInstaller onedir: store models alongside the exe
+    MODELS_DIR = os.path.join(os.path.dirname(_sys.executable), "models")
+else:
+    MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 DEFAULT_MODEL_DIR = os.path.join(MODELS_DIR, "default")
 USER_MODEL_DIR = os.path.join(MODELS_DIR, "user_model")
 os.makedirs(DEFAULT_MODEL_DIR, exist_ok=True)
 os.makedirs(USER_MODEL_DIR, exist_ok=True)
 
+import csv
+import urllib.request
+
 import numpy as np
-import pandas as pd
-from huggingface_hub import hf_hub_download
 import onnxruntime as ort
 
 # ImageNet normalization constants (for ViT tagger preprocessing)
@@ -84,6 +91,9 @@ def is_model_cached() -> bool:
     return os.path.isfile(os.path.join(DEFAULT_MODEL_DIR, _DEFAULT_ONNX))
 
 
+_HF_BASE_URL = "https://huggingface.co/{repo}/resolve/main/{filename}"
+
+
 def download_model():
     """Download the default model files from HuggingFace (blocking)."""
     logger.info("Downloading default model from %s ...", _DEFAULT_MODEL_REPO)
@@ -93,13 +103,8 @@ def download_model():
             logger.info("  %s — already cached", filename)
             continue
         logger.info("  %s — downloading...", filename)
-        hf_hub_download(
-            repo_id=_DEFAULT_MODEL_REPO,
-            filename=filename,
-            local_dir=DEFAULT_MODEL_DIR,
-            local_dir_use_symlinks=False,
-            cache_dir=MODELS_DIR,
-        )
+        url = _HF_BASE_URL.format(repo=_DEFAULT_MODEL_REPO, filename=filename)
+        urllib.request.urlretrieve(url, dest)
     logger.info("Default model download complete.")
     # Load into session if not already loaded
     if _tagger_session is None and not _active_model:
@@ -185,14 +190,29 @@ def _load_tagger():
 
     # Load labels
     logger.info("Loading labels: %s", labels_path)
-    df = pd.read_csv(labels_path)
-    if "tag_id" not in df.columns:
-        df = df.reset_index().rename(columns={"index": "tag_id"})
+    with open(labels_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        fieldnames = reader.fieldnames or []
 
-    _tagger_tag_names = df["name"].tolist()
-    _tagger_rating_indexes = df.index[df["category"] == RATING_CATEGORY].tolist()
-    _tagger_general_indexes = df.index[df["category"] == GENERAL_CATEGORY].tolist()
-    _tagger_char_indexes = df.index[df["category"] == CHARACTER_CATEGORY].tolist()
+    # Add tag_id column if missing (same behavior as pandas reset_index)
+    if "tag_id" not in fieldnames:
+        for i, row in enumerate(rows):
+            row["tag_id"] = str(i)
+
+    _tagger_tag_names = [row["name"] for row in rows]
+    _tagger_rating_indexes = [
+        i for i, row in enumerate(rows)
+        if int(row.get("category", -1)) == RATING_CATEGORY
+    ]
+    _tagger_general_indexes = [
+        i for i, row in enumerate(rows)
+        if int(row.get("category", -1)) == GENERAL_CATEGORY
+    ]
+    _tagger_char_indexes = [
+        i for i, row in enumerate(rows)
+        if int(row.get("category", -1)) == CHARACTER_CATEGORY
+    ]
 
     logger.info("Tagger ready (%d tags).", len(_tagger_tag_names))
 
