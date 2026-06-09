@@ -16,9 +16,9 @@ from models import (
     IllustrationResponse, IllustrationUpdate,
     SearchResult, IllustrationListResult,
 )
-from utils import extract_metadata, extract_tags, create_thumbnail, get_image_info, set_use_gpu, is_model_cached, download_model, list_available_models, set_model_repo, get_model_repo, MODELS_DIR, _dirname_to_repo
+from utils import extract_metadata, extract_tags, create_thumbnail, get_image_info, set_use_gpu, is_model_cached, download_model, list_available_models, set_active_model, get_active_model, USER_MODEL_DIR
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR:str = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 
@@ -39,8 +39,8 @@ def save_settings(data):
 # Apply GPU and model settings on startup
 _settings = load_settings()
 set_use_gpu(_settings.get("gpu_enabled", False))
-if _settings.get("tagger_model"):
-    set_model_repo(_settings["tagger_model"])
+if _settings.get("active_model"):
+    set_active_model(_settings["active_model"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -623,18 +623,17 @@ def get_settings():
 @app.put("/api/settings")
 def update_settings(body: dict):
     current = load_settings()
-    allowed = {"auto_tag", "gpu_enabled", "tagger_model"}
+    allowed = {"auto_tag", "gpu_enabled", "active_model"}
     for key in body:
         if key in allowed:
-            if key == "tagger_model":
+            if key == "active_model":
                 current[key] = str(body[key]) if body[key] else ""
             else:
                 current[key] = bool(body[key])
     save_settings(current)
     # Apply settings immediately
     set_use_gpu(current.get("gpu_enabled", False))
-    if current.get("tagger_model"):
-        set_model_repo(current["tagger_model"])
+    set_active_model(current.get("active_model", ""))
     return current
 
 
@@ -642,55 +641,52 @@ def update_settings(body: dict):
 
 @app.get("/api/models")
 def list_models():
-    """List available tagger model directories and files in the models folder."""
+    """List default model + user-uploaded models."""
     models = list_available_models()
-    current_repo = get_model_repo()
-    return {"models": models, "active_repo": current_repo}
+    current = get_active_model()
+    return {"models": models, "active_model": current}
 
 
 @app.post("/api/models/upload", status_code=201)
 async def upload_model(file: UploadFile = File(...)):
-    """Upload a model file to the models folder."""
+    """Upload a model file (.onnx or .csv) to the user_model directory."""
     if not file.filename:
         raise HTTPException(400, "No file provided")
     safe_name = os.path.basename(file.filename)
     if not safe_name:
         raise HTTPException(400, "Invalid filename")
-    dest = os.path.join(MODELS_DIR, safe_name)
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in (".onnx", ".csv"):
+        raise HTTPException(400, "Only .onnx and .csv files are accepted")
+    dest = os.path.join(USER_MODEL_DIR, safe_name)
     if os.path.exists(dest):
         raise HTTPException(409, f"File '{safe_name}' already exists")
-    os.makedirs(MODELS_DIR, exist_ok=True)
     contents = await file.read()
     with open(dest, "wb") as f:
         f.write(contents)
-    ext = os.path.splitext(safe_name)[1].lower()
-    return {"name": safe_name, "type": "file", "size": os.path.getsize(dest)}
+    return {"name": safe_name, "type": "user", "size": os.path.getsize(dest)}
 
 
 @app.delete("/api/models/{model_name:path}")
 def delete_model(model_name: str):
-    """Delete a model directory or file from the models folder."""
+    """Delete a user-uploaded model file from user_model/."""
     safe_name = os.path.basename(model_name)
-    if not safe_name or safe_name == "CACHEDIR.TAG":
+    if not safe_name:
         raise HTTPException(400, "Invalid model name")
-    target = os.path.join(MODELS_DIR, safe_name)
+    target = os.path.join(USER_MODEL_DIR, safe_name)
     if not os.path.exists(target):
         raise HTTPException(404, "Model not found")
-    if not os.path.realpath(target).startswith(os.path.realpath(MODELS_DIR)):
+    if not os.path.realpath(target).startswith(os.path.realpath(USER_MODEL_DIR)):
         raise HTTPException(400, "Path traversal denied")
     try:
-        if os.path.isdir(target):
-            shutil.rmtree(target)
-        else:
-            os.remove(target)
+        os.remove(target)
     except Exception as exc:
         raise HTTPException(500, f"Failed to delete: {exc}")
-    # If the deleted model was the active one, reset to default
-    current_repo = get_model_repo()
-    if _dirname_to_repo(safe_name) == current_repo:
-        set_model_repo("SmilingWolf/wd-eva02-large-tagger-v3")
+    # If the deleted model was active, reset to default
+    if get_active_model() == safe_name:
+        set_active_model("")
         current = load_settings()
-        current["tagger_model"] = ""
+        current["active_model"] = ""
         save_settings(current)
     return {"status": "deleted"}
 

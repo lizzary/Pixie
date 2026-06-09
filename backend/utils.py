@@ -9,74 +9,32 @@ from PIL.JpegImagePlugin import JpegImageFile
 
 logger = logging.getLogger(__name__)
 
-# Redirect HuggingFace model downloads to backend/models
+# ── Model directories ────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.environ["HF_HUB_CACHE"] = MODELS_DIR
+DEFAULT_MODEL_DIR = os.path.join(MODELS_DIR, "default")
+USER_MODEL_DIR = os.path.join(MODELS_DIR, "user_model")
+os.makedirs(DEFAULT_MODEL_DIR, exist_ok=True)
+os.makedirs(USER_MODEL_DIR, exist_ok=True)
 
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
-import timm
-from timm.data import resolve_data_config
-from timm.data.transforms_factory import create_transform
+import onnxruntime as ort
+
+# ImageNet normalization constants (for ViT tagger preprocessing)
+_IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+_IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+_TAGGER_INPUT_SIZE = 448  # ViT-Large input resolution
 
 # ── Tagger constants ──────────────────────────────────────────────────────────
-DEFAULT_MODEL_REPO = "SmilingWolf/wd-eva02-large-tagger-v3"
-LABELS_FILE = "selected_tags.csv"
-
-# Active model repo — can be changed via set_model_repo()
-_model_repo = DEFAULT_MODEL_REPO
-
-
-def set_model_repo(repo: str):
-    """Set the active tagger model repo and reset cached model if changed."""
-    global _model_repo, _tagger_model
-    if repo and repo != _model_repo:
-        _model_repo = repo
-        _tagger_model = None
-        logger.info("Model repo changed to %s, tagger will reload on next extraction", repo)
-
-
-def get_model_repo() -> str:
-    return _model_repo
-
-
-def _repo_to_dirname(repo: str) -> str:
-    """Convert HuggingFace repo ID to cache directory name."""
-    return "models--" + repo.replace("/", "--")
-
-
-def _dirname_to_repo(dirname: str) -> str:
-    """Convert cache directory name to HuggingFace repo ID."""
-    if dirname.startswith("models--"):
-        return dirname[len("models--"):].replace("--", "/", 1)
-    return dirname
-
-
-def list_available_models() -> list[dict]:
-    """List tagger model directories and model files in MODELS_DIR."""
-    models = []
-    if not os.path.isdir(MODELS_DIR):
-        return models
-    for entry in sorted(os.listdir(MODELS_DIR)):
-        if entry == "CACHEDIR.TAG":
-            continue
-        entry_path = os.path.join(MODELS_DIR, entry)
-        if os.path.isdir(entry_path) and entry.startswith("models--"):
-            # Check it has actual model content
-            for sub in ("blobs", "snapshots", "refs"):
-                sub_path = os.path.join(entry_path, sub)
-                if os.path.isdir(sub_path) and os.listdir(sub_path):
-                    models.append({"name": entry, "type": "huggingface", "repo": _dirname_to_repo(entry)})
-                    break
-        elif os.path.isfile(entry_path):
-            ext = os.path.splitext(entry)[1].lower()
-            if ext in (".pth", ".pt", ".bin", ".safetensors", ".ckpt", ".onnx"):
-                models.append({"name": entry, "type": "file", "size": os.path.getsize(entry_path)})
-    return models
+_DEFAULT_MODEL_REPO = "lizzary111/wd-eva02-large-tagger-v3"
+_DEFAULT_ONNX = "wd-eva02-large-tagger-v3.onnx"
+_DEFAULT_TAGS = "tags.csv"
+_DEFAULT_MODEL_FILES = [
+    "wd-eva02-large-tagger-v3.onnx",
+    "wd-eva02-large-tagger-v3.onnx.data",
+    "tags.csv",
+]
 
 RATING_CATEGORY = 9
 GENERAL_CATEGORY = 0
@@ -85,75 +43,149 @@ CHARACTER_CATEGORY = 4
 DEFAULT_GENERAL_THRESH = 0.35
 DEFAULT_CHARACTER_THRESH = 0.75
 
-# Module-level cache — model is loaded once and reused
-_tagger_model = None
+# Module-level cache
+_tagger_session = None
 _tagger_tag_names = None
 _tagger_rating_indexes = None
 _tagger_general_indexes = None
 _tagger_char_indexes = None
-_tagger_transform = None
+_active_model = ""   # "" = default model, filename = user model
 _use_gpu = False
+
+
+# ── Public model API ──────────────────────────────────────────────────────────
+
+def set_active_model(model_name: str):
+    """Set the active tagger model. Empty string selects the default model."""
+    global _active_model, _tagger_session
+    target = model_name.strip() if model_name else ""
+    if _active_model != target:
+        _active_model = target
+        _tagger_session = None
+        logger.info("Active model changed to: %s", target or "default")
+
+
+def get_active_model() -> str:
+    """Return the currently active model name (empty = default)."""
+    return _active_model
 
 
 def set_use_gpu(enabled: bool):
     """Set whether the tagger should use GPU acceleration."""
-    global _use_gpu, _tagger_model
+    global _use_gpu, _tagger_session
     _use_gpu = enabled
-    # Reset model if already loaded so it gets reloaded on next tag extraction
-    if _tagger_model is not None:
+    if _tagger_session is not None:
         logger.info("GPU setting changed, reloading tagger model on next extraction")
-        _tagger_model = None
+        _tagger_session = None
 
 
-def is_model_cached(repo: str = None) -> bool:
-    """Check whether a tagger model has been downloaded to the local cache."""
-    if repo is None:
-        repo = _model_repo
-    model_cache_dir = os.path.join(MODELS_DIR, _repo_to_dirname(repo))
-    if not os.path.isdir(model_cache_dir):
-        return False
-    blobs_dir = os.path.join(model_cache_dir, "blobs")
-    if os.path.isdir(blobs_dir) and os.listdir(blobs_dir):
-        return True
-    for sub in ("snapshots", "refs"):
-        d = os.path.join(model_cache_dir, sub)
-        if os.path.isdir(d) and os.listdir(d):
-            return True
-    return False
+def is_model_cached() -> bool:
+    """Check whether the default ONNX model exists locally."""
+    return os.path.isfile(os.path.join(DEFAULT_MODEL_DIR, _DEFAULT_ONNX))
 
 
 def download_model():
-    """Pre-download the tagger model to the local cache (blocking)."""
-    logger.info("Pre-downloading tagger model...")
-    _load_tagger()
-    logger.info("Tagger model download complete.")
+    """Download the default model files from HuggingFace (blocking)."""
+    logger.info("Downloading default model from %s ...", _DEFAULT_MODEL_REPO)
+    for filename in _DEFAULT_MODEL_FILES:
+        dest = os.path.join(DEFAULT_MODEL_DIR, filename)
+        if os.path.isfile(dest):
+            logger.info("  %s — already cached", filename)
+            continue
+        logger.info("  %s — downloading...", filename)
+        hf_hub_download(
+            repo_id=_DEFAULT_MODEL_REPO,
+            filename=filename,
+            local_dir=DEFAULT_MODEL_DIR,
+            local_dir_use_symlinks=False,
+            cache_dir=MODELS_DIR,
+        )
+    logger.info("Default model download complete.")
+    # Load into session if not already loaded
+    if _tagger_session is None and not _active_model:
+        _load_tagger()
 
+
+def list_available_models() -> list[dict]:
+    """List the default model and user-uploaded ONNX models."""
+    models = []
+    default_onnx = os.path.join(DEFAULT_MODEL_DIR, _DEFAULT_ONNX)
+    models.append({
+        "name": "wd-eva02-large-tagger-v3 (Default)",
+        "type": "default",
+        "cached": os.path.isfile(default_onnx),
+    })
+    if os.path.isdir(USER_MODEL_DIR):
+        for entry in sorted(os.listdir(USER_MODEL_DIR)):
+            if entry.lower().endswith(".onnx"):
+                path = os.path.join(USER_MODEL_DIR, entry)
+                models.append({
+                    "name": entry,
+                    "type": "user",
+                    "size": os.path.getsize(path),
+                })
+    return models
+
+
+# ── Internal model loading ────────────────────────────────────────────────────
 
 def _load_tagger():
-    """Lazy-load and cache the WD EVA02-Large Tagger v3 model."""
-    global _tagger_model, _tagger_tag_names, _tagger_rating_indexes
-    global _tagger_general_indexes, _tagger_char_indexes, _tagger_transform
+    """Lazy-load the active tagger model with onnxruntime.
 
-    if _tagger_model is not None:
+    If _active_model is empty, loads the default model from default/.
+    Otherwise loads the named ONNX file from user_model/, falling back to
+    default/tags.csv if no matching CSV is found alongside the user model.
+    """
+    global _tagger_session, _tagger_tag_names, _tagger_rating_indexes
+    global _tagger_general_indexes, _tagger_char_indexes
+
+    if _tagger_session is not None:
         return
 
-    device = "cuda" if (_use_gpu and torch.cuda.is_available()) else "cpu"
-    if _use_gpu and not torch.cuda.is_available():
-        logger.warning("GPU enabled but CUDA not available, falling back to CPU")
+    # Determine ONNX path and labels path
+    if _active_model:
+        onnx_path = os.path.join(USER_MODEL_DIR, _active_model)
+        # Labels: matching CSV > user tags.csv > default tags.csv
+        stem = os.path.splitext(_active_model)[0]
+        user_csv = os.path.join(USER_MODEL_DIR, stem + ".csv")
+        user_tags = os.path.join(USER_MODEL_DIR, "tags.csv")
+        default_tags = os.path.join(DEFAULT_MODEL_DIR, _DEFAULT_TAGS)
+        if os.path.isfile(user_csv):
+            labels_path = user_csv
+        elif os.path.isfile(user_tags):
+            labels_path = user_tags
+        else:
+            labels_path = default_tags
+    else:
+        onnx_path = os.path.join(DEFAULT_MODEL_DIR, _DEFAULT_ONNX)
+        labels_path = os.path.join(DEFAULT_MODEL_DIR, _DEFAULT_TAGS)
 
-    logger.info("Loading tagger model %s on %s (first call downloads weights)...", _model_repo, device)
-    model = timm.create_model(f"hf_hub:{_model_repo}", pretrained=True)
-    model.eval()
-    _tagger_model = model.to(device)
+    if not os.path.isfile(onnx_path):
+        if not _active_model:
+            raise FileNotFoundError(
+                f"Default model not found: {onnx_path}\n"
+                f"Go to Settings → Download Model to download it."
+            )
+        else:
+            raise FileNotFoundError(
+                f"User model not found: {onnx_path}"
+            )
 
-    logger.info("Downloading tag labels...")
-    labels_path = hf_hub_download(
-        repo_id=_model_repo,
-        filename=LABELS_FILE,
-        cache_dir=MODELS_DIR,
-    )
+    if not os.path.isfile(labels_path):
+        raise FileNotFoundError(f"Tags CSV not found: {labels_path}")
+
+    # Configure ONNX Runtime providers
+    providers = []
+    if _use_gpu:
+        providers.append("CUDAExecutionProvider")
+    providers.append("CPUExecutionProvider")
+
+    logger.info("Loading tagger: %s (providers: %s)", onnx_path, providers)
+    _tagger_session = ort.InferenceSession(onnx_path, providers=providers)
+
+    # Load labels
+    logger.info("Loading labels: %s", labels_path)
     df = pd.read_csv(labels_path)
-
     if "tag_id" not in df.columns:
         df = df.reset_index().rename(columns={"index": "tag_id"})
 
@@ -162,10 +194,7 @@ def _load_tagger():
     _tagger_general_indexes = df.index[df["category"] == GENERAL_CATEGORY].tolist()
     _tagger_char_indexes = df.index[df["category"] == CHARACTER_CATEGORY].tolist()
 
-    config = resolve_data_config(model.pretrained_cfg, model=model)
-    _tagger_transform = create_transform(**config)
-
-    logger.info("Tagger model loaded.")
+    logger.info("Tagger ready (%d tags).", len(_tagger_tag_names))
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -940,9 +969,22 @@ def extract_metadata(image_path: str, image: Image.Image) -> dict:
     return {"fileinfo": fileinfo, **result}
 
 
+def _preprocess(image: Image.Image) -> np.ndarray:
+    """Preprocess image for ViT tagger: resize → normalize → NCHW + batch dim."""
+    # Resize to model input size
+    image = image.resize((_TAGGER_INPUT_SIZE, _TAGGER_INPUT_SIZE), Image.BICUBIC)
+    # Convert to float32 array in [0, 1]
+    img = np.array(image, dtype=np.float32) / 255.0
+    # ImageNet normalization
+    img = (img - _IMAGENET_MEAN) / _IMAGENET_STD
+    # HWC → CHW, then add batch dimension → (1, 3, 448, 448)
+    img = np.transpose(img, (2, 0, 1))
+    return np.expand_dims(img, axis=0)
+
+
 def extract_tags(image: Image.Image) -> str:
     """
-    Extract tags using WD EVA02-Large Tagger v3.
+    Extract tags using WD EVA02-Large Tagger v3 (ONNX Runtime).
     Returns a comma-separated string, e.g. "1girl, solo, ..."
     Falls back to "" on any error.
     """
@@ -957,11 +999,12 @@ def extract_tags(image: Image.Image) -> str:
         elif image.mode != "RGB":
             image = image.convert("RGB")
 
-        tensor = _tagger_transform(image).unsqueeze(0)
-
-        with torch.no_grad():
-            logits = _tagger_model(tensor)
-            probs = F.sigmoid(logits).squeeze(0).cpu().numpy()
+        # Preprocess and run inference via ONNX Runtime
+        input_array = _preprocess(image)
+        outputs = _tagger_session.run(["output"], {"input": input_array})
+        logits = outputs[0]                     # shape: (1, num_tags)
+        probs = 1.0 / (1.0 + np.exp(-logits))   # sigmoid
+        probs = np.squeeze(probs, axis=0)        # (num_tags,)
 
         tags = []
         for i in _tagger_char_indexes:

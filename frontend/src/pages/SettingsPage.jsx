@@ -14,11 +14,6 @@ const LANG_OPTIONS = [
   { value: 'zh', labelKey: 'settings.general.language.zh' },
 ];
 
-function modelDisplayName(m) {
-  if (m.type === 'huggingface') return m.repo || m.name;
-  return m.name;
-}
-
 export default function SettingsPage() {
   const { locale, setLocale, t } = useLocale();
   const { addToast } = useToast();
@@ -29,10 +24,11 @@ export default function SettingsPage() {
 
   // Model management state
   const [models, setModels] = useState([]);
-  const [activeRepo, setActiveRepo] = useState('');
+  const [activeModel, setActiveModel] = useState('');
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const modelDropdownRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -40,7 +36,7 @@ export default function SettingsPage() {
     listModels()
       .then(data => {
         setModels(data.models || []);
-        setActiveRepo(data.active_repo || '');
+        setActiveModel(data.active_model || '');
       })
       .catch(() => {});
   }, []);
@@ -94,23 +90,37 @@ export default function SettingsPage() {
     }
   };
 
-  const handleModelSelect = async (repo) => {
+  const handleModelSelect = async (modelName) => {
     setModelDropdownOpen(false);
-    if (repo === activeRepo) return;
-    setActiveRepo(repo);
+    if (modelName === activeModel) return;
+    setActiveModel(modelName);
     try {
       const res = await fetch(`${BASE_URL}/api/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tagger_model: repo }),
+        body: JSON.stringify({ active_model: modelName }),
       });
       if (!res.ok) throw new Error('Save failed');
       const updated = await res.json();
       setSettings(updated);
       addToast(t('settings.toast.saved'), 'success');
     } catch {
-      setActiveRepo(activeRepo);
+      setActiveModel(activeModel);
       addToast(t('settings.toast.saveFailed'), 'error');
+    }
+  };
+
+  const handleModelDownload = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/model/download`, { method: 'POST' });
+      if (!res.ok) throw new Error('Download failed');
+      addToast(t('settings.toast.saved'), 'success');
+      fetchModels(); // refresh cached status
+    } catch {
+      addToast(t('settings.toast.saveFailed'), 'error');
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -134,6 +144,7 @@ export default function SettingsPage() {
     if (!deleteTarget) return;
     try {
       await deleteModel(deleteTarget.name);
+      if (activeModel === deleteTarget.name) setActiveModel('');
       addToast(t('settings.toast.saved'), 'success');
       fetchModels();
     } catch {
@@ -143,12 +154,12 @@ export default function SettingsPage() {
     }
   };
 
-  const selectedLabel = activeRepo
-    ? (models.find(m => (m.type === 'huggingface' ? m.repo : m.name) === activeRepo) || { name: activeRepo })
-    : null;
-  const selectedDisplayName = selectedLabel
-    ? modelDisplayName(selectedLabel)
-    : t('settings.indexing.modelNone');
+  const selectedDisplayName = activeModel
+    ? (models.find(m => m.name === activeModel)?.name || activeModel)
+    : t('settings.indexing.modelDefault');
+  const defaultModel = models.find(m => m.type === 'default');
+  const defaultCached = defaultModel?.cached ?? false;
+  const userModels = models.filter(m => m.type === 'user');
 
   return (
     <div className="min-h-screen bg-surface-primary text-content-primary">
@@ -208,7 +219,7 @@ export default function SettingsPage() {
                 <div className="relative" ref={modelDropdownRef}>
                   <button
                     onClick={() => setModelDropdownOpen(v => !v)}
-                    disabled={uploading}
+                    disabled={uploading || downloading}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-tertiary border border-edge-secondary text-sm text-content-primary hover:border-accent/50 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all min-w-[180px]"
                   >
                     <span className="flex-1 text-left truncate max-w-[180px]">{selectedDisplayName}</span>
@@ -217,15 +228,22 @@ export default function SettingsPage() {
 
                   {modelDropdownOpen && (
                     <div className="absolute top-full mt-1 right-0 w-[320px] bg-surface-secondary border border-edge-primary rounded-xl shadow-2xl z-50 overflow-hidden">
-                      {/* Default option */}
+                      {/* Default model */}
                       <button
                         onClick={() => handleModelSelect('')}
                         className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-colors hover:bg-surface-tertiary ${
-                          !activeRepo ? 'text-accent bg-accent/5' : 'text-content-primary'
+                          !activeModel ? 'text-accent bg-accent/5' : 'text-content-primary'
                         }`}
                       >
-                        <span className="truncate">{t('settings.indexing.modelNone')}</span>
-                        {!activeRepo && (
+                        <div>
+                          <span className="truncate">{t('settings.indexing.modelDefault')}</span>
+                          {defaultCached ? (
+                            <span className="ml-2 text-xs text-success">{t('settings.indexing.modelCached')}</span>
+                          ) : (
+                            <span className="ml-2 text-xs text-content-muted">{t('settings.indexing.modelNotCached')}</span>
+                          )}
+                        </div>
+                        {!activeModel && (
                           <span className="w-4 h-4 rounded-full bg-accent flex items-center justify-center flex-shrink-0 ml-2">
                             <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -234,18 +252,12 @@ export default function SettingsPage() {
                         )}
                       </button>
 
-                      <div className="border-t border-edge-subtle" />
-
-                      {/* Model list */}
-                      {models.length === 0 ? (
-                        <div className="px-4 py-6 text-center text-sm text-content-muted">
-                          {t('settings.indexing.modelNoModels')}
-                        </div>
-                      ) : (
-                        <div className="max-h-64 overflow-y-auto">
-                          {models.map(m => {
-                            const repo = m.type === 'huggingface' ? m.repo : m.name;
-                            const isActive = repo === activeRepo;
+                      {/* User models */}
+                      {userModels.length > 0 && (
+                        <>
+                          <div className="border-t border-edge-subtle" />
+                          {userModels.map(m => {
+                            const isActive = m.name === activeModel;
                             return (
                               <div
                                 key={m.name}
@@ -254,12 +266,12 @@ export default function SettingsPage() {
                                 }`}
                               >
                                 <button
-                                  onClick={() => handleModelSelect(repo)}
+                                  onClick={() => handleModelSelect(m.name)}
                                   className={`flex-1 text-left px-4 py-2.5 text-sm truncate transition-colors ${
                                     isActive ? 'text-accent font-medium' : 'text-content-primary'
                                   }`}
                                 >
-                                  {modelDisplayName(m)}
+                                  {m.name}
                                 </button>
                                 <button
                                   onClick={(e) => {
@@ -274,6 +286,12 @@ export default function SettingsPage() {
                               </div>
                             );
                           })}
+                        </>
+                      )}
+
+                      {userModels.length === 0 && (
+                        <div className="border-t border-edge-subtle px-4 py-4 text-center text-xs text-content-muted">
+                          {t('settings.indexing.modelNoUserModels')}
                         </div>
                       )}
                     </div>
@@ -283,9 +301,9 @@ export default function SettingsPage() {
                 {/* Upload button */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
+                  disabled={uploading || downloading}
                   className={`p-2 rounded-lg border border-edge-secondary bg-surface-tertiary hover:bg-edge-secondary hover:border-accent/50 text-content-tertiary hover:text-accent transition-all ${
-                    uploading ? 'opacity-50 cursor-wait' : ''
+                    (uploading || downloading) ? 'opacity-50 cursor-wait' : ''
                   }`}
                   title={t('settings.indexing.modelUpload')}
                 >
@@ -295,11 +313,33 @@ export default function SettingsPage() {
                   ref={fileInputRef}
                   type="file"
                   className="hidden"
-                  accept=".pth,.pt,.bin,.safetensors,.ckpt,.onnx,.zip"
+                  accept=".onnx,.csv"
                   onChange={handleModelUpload}
                 />
               </div>
             </div>
+
+            {/* Download default model button — only shown when not cached */}
+            {!defaultCached && (
+              <div className="flex items-center justify-between px-5 py-4">
+                <div>
+                  <span className="text-sm font-medium text-content-primary">{t('settings.indexing.modelDownloadTitle')}</span>
+                  <p className="text-xs text-content-muted mt-0.5">{t('settings.indexing.modelDownloadDesc')}</p>
+                </div>
+                <button
+                  onClick={handleModelDownload}
+                  disabled={downloading}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-all ${
+                    downloading
+                      ? 'bg-surface-tertiary text-content-muted cursor-wait'
+                      : 'bg-accent hover:bg-accent-hover text-white shadow-lg shadow-accent/20 hover:shadow-accent/30 hover:scale-[1.03]'
+                  }`}
+                >
+                  <Download className={`w-4 h-4 ${downloading ? 'animate-pulse' : ''}`} />
+                  {downloading ? t('settings.indexing.modelDownloading') : t('settings.indexing.modelDownload')}
+                </button>
+              </div>
+            )}
 
             {/* Auto-tag toggle */}
             <div className="flex items-center justify-between px-5 py-4">
@@ -379,7 +419,7 @@ export default function SettingsPage() {
       {deleteTarget && (
         <ConfirmModal
           title={t('settings.indexing.modelDeleteTitle')}
-          message={t('settings.indexing.modelDeleteMessage', { name: modelDisplayName(deleteTarget) })}
+          message={t('settings.indexing.modelDeleteMessage', { name: deleteTarget.name })}
           confirmText={t('settings.indexing.modelDeleteConfirm')}
           cancelText={t('confirmModal.cancel')}
           onConfirm={handleModelDelete}
