@@ -130,3 +130,17 @@ export function uploadModel(file) {
 export function deleteModel(modelName) {
   return request(`/api/models/${encodeURIComponent(modelName)}`, { method: 'DELETE' });
 }
+
+// ── Settings ──────────────────────────────────────────────
+
+export function getSettings() {
+  return request('/api/settings');
+}
+
+export function updateSettings(data) {
+  return request('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}

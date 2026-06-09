@@ -4,7 +4,7 @@ import { ArrowUpDown, Layers, Settings, Upload, Download, Trash2, X, Monitor, Lo
 import useQuality from '../hooks/useQuality';
 import useCardSize, { CARD_SIZE_MIN, CARD_SIZE_MAX } from '../hooks/useCardSize';
 import useDownloadConfig, { resolveFilename, sanitizeFilename } from '../hooks/useDownloadConfig';
-import { listIllustrations, uploadSingleIllustration, updateGroup, deleteIllustration, checkModelStatus, downloadModel } from '../api';
+import { listIllustrations, uploadSingleIllustration, updateGroup, deleteIllustration, checkModelStatus, downloadModel, getSettings } from '../api';
 import { useToast } from './Toast';
 import ConfirmModal from './ConfirmModal';
 import Lightbox from './Lightbox';
@@ -27,6 +27,7 @@ export default function GroupOverlay({ group, onClose, onGroupUpdated }) {
   const [uploadProgress, setUploadProgress] = useState(null); // { current, total, filename, stage }
   const [pendingFiles, setPendingFiles] = useState(null); // files queued for upload while model modal is shown
   const [showModelModal, setShowModelModal] = useState(false);
+  const [autoTagEnabled, setAutoTagEnabled] = useState(true); // whether auto-tag is enabled in Settings
   const [filterQuery, setFilterQuery] = useState('');
   const [filterScope, setFilterScope] = useState('all'); // 'all' | 'tag' | 'prompt'
   const [error, setError] = useState('');
@@ -114,6 +115,13 @@ export default function GroupOverlay({ group, onClose, onGroupUpdated }) {
     setLastClickedId(null);
     fetchPage(currentPage, pageSize);
   }, [currentPage, pageSize, fetchPage]);
+
+  // Fetch settings to know whether auto-tag is enabled
+  useEffect(() => {
+    getSettings()
+      .then(data => setAutoTagEnabled(data.auto_tag ?? true))
+      .catch(() => { /* keep default */ });
+  }, []);
 
   const handlePageSizeChange = (size) => {
     setPageSize(size);
@@ -236,6 +244,12 @@ export default function GroupOverlay({ group, onClose, onGroupUpdated }) {
   const handleUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
+
+    // If auto-tag is disabled in Settings, skip model check and upload directly
+    if (!autoTagEnabled) {
+      await doUpload(files, true);
+      return;
+    }
 
     // Check if the tagger model is cached (needed for auto-tag)
     try {
