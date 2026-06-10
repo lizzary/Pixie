@@ -715,7 +715,7 @@ if os.path.isdir(FRONTEND_BUILD):
 if __name__ == "__main__":
     import sys
     import uvicorn
-    # PyInstaller bundles the app — use the object directly, no reload
+
     if getattr(sys, "frozen", False):
         uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
     else:
