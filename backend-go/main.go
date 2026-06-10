@@ -94,7 +94,7 @@ func main() {
 		if err := tagger.LoadTagger(*modelsDir); err != nil {
 			fmt.Println("  Tagger not available:", err)
 			fmt.Println("  Auto-tagging will be skipped.")
-			fmt.Println("  Download the model from Settings page, or use -tags noonx to disable.")
+			fmt.Println("  Download the model from Settings page.")
 		}
 	}
 

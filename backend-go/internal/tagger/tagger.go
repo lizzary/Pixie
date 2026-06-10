@@ -1,6 +1,3 @@
-//go:build !noonx
-// +build !noonx
-
 package tagger
 
 import (
@@ -48,6 +45,11 @@ var (
 func clearTaggerCache() {
 	taggerMu.Lock()
 	defer taggerMu.Unlock()
+	clearTaggerCacheLocked()
+}
+
+// clearTaggerCacheLocked assumes taggerMu is already held.
+func clearTaggerCacheLocked() {
 	if taggerSession != nil {
 		taggerSession.Destroy()
 		taggerSession = nil
@@ -63,9 +65,7 @@ func LoadTagger(modelsDir string) error {
 	taggerMu.Lock()
 	defer taggerMu.Unlock()
 
-	if taggerSession != nil {
-		return nil
-	}
+	clearTaggerCacheLocked()
 
 	modelMu.RLock()
 	active := activeModel

@@ -37,11 +37,7 @@ var (
 func SetActiveModel(name string) {
 	modelMu.Lock()
 	defer modelMu.Unlock()
-	if strings.TrimSpace(name) != activeModel {
-		activeModel = strings.TrimSpace(name)
-		// Invalidate cached session
-		clearTaggerCache()
-	}
+	activeModel = strings.TrimSpace(name)
 }
 
 func GetActiveModel() string {
@@ -53,10 +49,7 @@ func GetActiveModel() string {
 func SetUseGPU(enabled bool) {
 	modelMu.Lock()
 	defer modelMu.Unlock()
-	if useGPU != enabled {
-		useGPU = enabled
-		clearTaggerCache()
-	}
+	useGPU = enabled
 }
 
 // ── Model availability ───────────────────────────────────────────────────

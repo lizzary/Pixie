@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,6 +25,10 @@ func (s *Server) ModelDownload(w http.ResponseWriter, r *http.Request) {
 	if err := tagger.DownloadModel(s.ModelsDir()); err != nil {
 		writeError(w, 500, "Model download failed: "+err.Error())
 		return
+	}
+	// Reload tagger so the newly downloaded model takes effect immediately
+	if err := tagger.LoadTagger(s.ModelsDir()); err != nil {
+		fmt.Println("Tagger reload after download failed:", err)
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
@@ -128,6 +133,9 @@ func (s *Server) DeleteModel(w http.ResponseWriter, r *http.Request) {
 	// If the deleted model was active, reset to default
 	if tagger.GetActiveModel() == modelName {
 		tagger.SetActiveModel("")
+		if err := tagger.LoadTagger(s.ModelsDir()); err != nil {
+			fmt.Println("Tagger reload after model deletion failed:", err)
+		}
 	}
 
 	writeJSON(w, 200, map[string]string{"status": "deleted"})

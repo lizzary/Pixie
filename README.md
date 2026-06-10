@@ -375,9 +375,8 @@ This produces `artifex-server.exe` with the full ONNX-powered auto-tagging pipel
 >
 > | Command | Result |
 > |---------|--------|
-> | `build.bat` (or `build.bat noonx`) | Pure Go, portable |
-> | `build.bat build` | Full CGO + ONNX |
-> | `build.bat run` | Dev server (pure Go, http://127.0.0.1:8000) |
+> | `build.bat` | Full CGO + ONNX |
+> | `build.bat run` | Dev server (http://127.0.0.1:8000) |
 > | `build.bat clean` | Remove build artifacts |
 > | `build.bat dist` | Package into `dist/Artifex/` |
 > | `build.bat dist-full` | Package with frontend included |
@@ -450,12 +449,6 @@ Copy the `dist/Artifex/` folder to any Windows machine and run `Artifex.exe`.
 ### 11. Troubleshooting
 
 <details>
-<summary><b>"build constraints exclude all Go files"</b> when building without <code>-tags noonx</code></summary>
-
-This means CGO is disabled (default on Windows). Ensure you have GCC installed (Step 6) and use `build.bat build` (which sets `CGO_ENABLED=1`) instead of a bare `go build`.
-</details>
-
-<details>
 <summary><b>"Tagger not available: failed to initialize ONNX Runtime"</b></summary>
 
 `Onnxruntime.dll` was not found at runtime. Verify:
@@ -484,10 +477,9 @@ GCC/MinGW is not installed or not in PATH. Follow Step 6, then restart your term
 <details>
 <summary><b>Auto-tagging produces empty / incorrect tags</b></summary>
 
-1. Verify the build was done **without** `-tags noonx` (`build.bat build`, not `build.bat`)
-2. Check the model files are complete (all 3 files in `models/default/`)
-3. Check server console output — it should say `Tagger ready (<N> tags).`
-4. If using GPU (`settings.json` → `gpu_enabled: true`), try disabling it: the CUDA provider may be unavailable
+1. Check the model files are complete (all 3 files in `models/default/`)
+2. Check server console output — it should say `Tagger ready (<N> tags).`
+3. If using GPU (`settings.json` → `gpu_enabled: true`), try disabling it: the CUDA provider may be unavailable
 </details>
 
 <details>
