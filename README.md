@@ -158,29 +158,7 @@ Built-in support for **English** and **中文 (Chinese)**. All user-facing text 
 ## Development Environment Setup
 
 > **Target audience:** Developers who want to build and run Artifex from source, or contributors who need to modify the backend / frontend.
-
-### Tech Stack Overview
-
-| Layer      | Technology                                |
-|------------|-------------------------------------------|
-| Backend    | Go 1.26 + [go-chi/chi](https://github.com/go-chi/chi) (REST API) |
-| Database   | SQLite (via modernc.org/sqlite, pure Go)    |
-| Auto-Tag   | ONNX Runtime + WD EVA02-Large Tagger v3     |
-| Frontend   | React 19 + Tailwind CSS + Framer Motion     |
-| Packaging  | PyInstaller `.spec` (Python launcher)        |
-
-### 1. System Requirements
-
-| Requirement | Minimum          | Recommended            |
-|-------------|------------------|------------------------|
-| OS          | Windows 10+ / Linux (x86_64) | Windows 11 / Ubuntu 22.04+ |
-| RAM         | 4 GB             | 8 GB+                   |
-| Disk Space  | 3 GB (project + model) | 10 GB+ (with image library) |
-| Go          | 1.26+            | 1.26.4                  |
-| Node.js     | 18+              | 20 LTS                  |
-| GCC (optional) | MinGW-w64 (Windows) / gcc (Linux) | —                       |
-
-### 2. Clone the Project
+### 1. Clone the Project
 
 ```bash
 git clone <repository-url>
@@ -211,7 +189,7 @@ Artifex-dev/
 └── README.md
 ```
 
-### 3. Install Go SDK
+### 2. Install Go SDK
 
 **Windows:**
 
@@ -237,7 +215,7 @@ export PATH=$PATH:/usr/local/go/bin  # add to ~/.bashrc for persistence
 go version
 ```
 
-### 4. Install Node.js (Frontend)
+### 3. Install Node.js (Frontend)
 
 Download the LTS installer from https://nodejs.org/ (v20 LTS recommended). After installation, verify:
 
@@ -253,7 +231,7 @@ cd frontend
 npm install
 ```
 
-### 5. Build the Frontend
+### 4. Build the Frontend
 
 ```bash
 cd frontend
@@ -278,7 +256,7 @@ npm start
 
 > The following three steps are **only needed if you want AI-powered auto-tagging**. If you only need the core gallery features (upload, browse, search, manual tags, metadata, color groups), skip to **Step 9** and use the pure-Go build.
 
-### 6. Install GCC (MinGW-w64 on Windows)
+### 5. Install GCC (MinGW-w64 on Windows)
 
 The ONNX Runtime Go bindings require **CGO**, which needs a C compiler.
 
@@ -324,7 +302,7 @@ sudo apt install build-essential   # Debian/Ubuntu
 # GCC is included
 ```
 
-### 7. Install ONNX Runtime DLL
+### 6. Install ONNX Runtime DLL
 
 The ONNX Runtime shared library is required at **runtime** (not just build time). It must be discoverable by the OS dynamic linker.
 
@@ -355,7 +333,7 @@ sudo cp onnxruntime-linux-x64-1.21.0/lib/libonnxruntime.so* /usr/local/lib/
 sudo ldconfig
 ```
 
-### 8. Download the AI Tagger Model
+### 7. Download the AI Tagger Model
 
 The tagger model (`wd-eva02-large-tagger-v3`, ~800 MB) can be downloaded in two ways:
 
@@ -389,7 +367,7 @@ backend-go/models/default/
 └── tags.csv                            (tag labels)
 ```
 
-### 9. Build the Backend
+### 8. Build the Backend
 
 You have **two build modes** — pick one:
 
@@ -434,7 +412,7 @@ This produces `artifex-server.exe` with the full ONNX-powered auto-tagging pipel
 > | `build.bat dist` | Package into `dist/Artifex/` |
 > | `build.bat dist-full` | Package with frontend included |
 
-### 10. Run the Server
+### 9. Run the Server
 
 ```cmd
 cd backend-go
@@ -469,7 +447,7 @@ On first launch:
 3. If the model is missing, it prints a message and continues without auto-tagging
 4. Go to **Settings → Model Management** to download the model
 
-### 11. Distribution Packaging
+### 10. Distribution Packaging
 
 To create a standalone distribution for deployment:
 
@@ -499,7 +477,7 @@ dist/Artifex/
 
 Copy the `dist/Artifex/` folder to any Windows machine and run `Artifex.exe`.
 
-### 12. Troubleshooting
+### 11. Troubleshooting
 
 <details>
 <summary><b>"build constraints exclude all Go files"</b> when building without <code>-tags noonx</code></summary>
