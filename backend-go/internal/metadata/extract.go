@@ -118,7 +118,12 @@ var samplerNodeTypes = map[string]bool{
 var modelLoaderTypes = map[string]bool{
 	"CheckpointLoaderSimple": true, "CheckpointLoader|pysssss": true,
 	"ModelLoader": true, "CheckpointLoader": true,
+	"UNETLoader": true, "UnetLoaderGGUF": true, "UnetLoaderGGML": true, "UnetLoaderGGMLv3": true,
 }
+
+// modelInputFields lists the input field names that may contain a model file path,
+// ordered by priority (more specific loaders checked first).
+var modelInputFields = []string{"ckpt_name", "unet_name", "file_name"}
 
 var loraLoaderTypes = map[string]bool{
 	"LoraLoader": true, "Power Lora Loader (rgthree)": true,
@@ -299,8 +304,59 @@ func Extract(imagePath string, img image.Image) (map[string]interface{}, error) 
 		result["LoRAs"] = "N/A"
 	}
 
-	// Deduplicate identical positive/negative
-	if positive == negative && positive != "" {
+	// Deduplicate identical positive/negative like Python reference
+	if positive != "" && negative != "" && positive == negative {
+		// Search again for a proper negative
+		var negCandidates []string
+		for _, node := range promptObj {
+			n, ok := node.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			ct := getStringField(n, "class_type")
+			if ct == "" {
+				ct = getStringField(n, "type")
+			}
+			title := ""
+			if meta := getMapField(n, "_meta"); meta != nil {
+				title = getStringField(meta, "title")
+			}
+			inputs := getMapField(n, "inputs")
+			if inputs == nil {
+				continue
+			}
+			for _, key := range []string{"prompt", "text"} {
+				if s, ok := inputs[key].(string); ok {
+					if trimmed, ok := isPlainPromptString(s); ok && isNegativePrompt(trimmed) {
+						if strings.Contains(strings.ToLower(title), "negative") || strings.Contains(strings.ToLower(ct), "negative") {
+							negCandidates = append([]string{trimmed}, negCandidates...)
+						} else {
+							negCandidates = append(negCandidates, trimmed)
+						}
+					}
+				}
+			}
+		}
+		// Deduplicate and filter out the positive prompt
+		seen := map[string]bool{}
+		var filtered []string
+		for _, c := range negCandidates {
+			if c != positive && !seen[c] {
+				seen[c] = true
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) > 0 {
+			negative = filtered[0]
+			result["Negative Prompt"] = negative
+		} else {
+			result["Negative Prompt"] = ""
+		}
+	}
+
+	// Swap if only negative is set but looks positive (not negative)
+	if positive == "" && negative != "" && isPositivePrompt(negative) && !isNegativePrompt(negative) {
+		result["Positive Prompt"] = negative
 		result["Negative Prompt"] = ""
 	}
 
@@ -445,15 +501,16 @@ func getMapSliceField(m map[string]interface{}, key string) []interface{} {
 // ── Model Extraction ─────────────────────────────────────────────────────
 
 func extractModelFromPrompt(promptObj map[string]interface{}) string {
-	var resolve func(ref interface{}, visited map[interface{}]bool) string
-	resolve = func(ref interface{}, visited map[interface{}]bool) string {
+	var resolve func(ref interface{}, visited map[string]bool) string
+	resolve = func(ref interface{}, visited map[string]bool) string {
 		if ref == nil {
 			return ""
 		}
-		if visited[ref] {
+		key := fmt.Sprintf("%p", ref)
+		if visited[key] {
 			return ""
 		}
-		visited[ref] = true
+		visited[key] = true
 
 		// String ref
 		if s, ok := ref.(string); ok {
@@ -490,13 +547,12 @@ func extractModelFromPrompt(promptObj map[string]interface{}) string {
 						}
 					}
 					if modelLoaderTypes[ct] {
-						if ckptName, ok := inputs["ckpt_name"]; ok {
-							return resolve(ckptName, visited)
-						}
-					}
-					for _, val := range inputs {
-						if result := resolve(val, visited); result != "" {
-							return result
+						for _, field := range modelInputFields {
+							if val, ok := inputs[field]; ok {
+								if result := resolve(val, visited); result != "" {
+									return result
+								}
+							}
 						}
 					}
 				}
@@ -516,22 +572,19 @@ func extractModelFromPrompt(promptObj map[string]interface{}) string {
 				continue
 			}
 			if modelLoaderTypes[ct] {
-				if ckptName, ok := inputs["ckpt_name"]; ok {
-					if result := resolve(ckptName, map[interface{}]bool{}); result != "" {
-						return result
+				for _, field := range modelInputFields {
+					if val, ok := inputs[field]; ok {
+						if result := resolve(val, map[string]bool{}); result != "" {
+							return result
+						}
 					}
 				}
 			}
 			if loraLoaderTypes[ct] {
 				if modelRef, ok := inputs["model"]; ok {
-					if result := resolve(modelRef, map[interface{}]bool{}); result != "" {
+					if result := resolve(modelRef, map[string]bool{}); result != "" {
 						return result
 					}
-				}
-			}
-			for _, val := range inputs {
-				if result := resolve(val, map[interface{}]bool{}); result != "" {
-					return result
 				}
 			}
 		}
@@ -615,22 +668,68 @@ func extractSeedFromPrompt(promptObj map[string]interface{}, samplerNodeID strin
 	return ""
 }
 
+var workflowSamplerTypes = map[string]bool{
+	"KSampler": true, "UltimateSDUpscale": true, "KSamplerAdvanced": true,
+	"SamplerCustom": true, "FaceDetailerPipe": true,
+}
+
 func extractSeedFromWorkflow(workflowObj map[string]interface{}) string {
-	// Simplified: find KSampler node and extract seed from widgets_values
 	nodes := getMapSliceField(workflowObj, "nodes")
+	// Find a sampler node
+	var sampler map[string]interface{}
 	for _, node := range nodes {
-		n, ok := node.(map[string]interface{})
-		if !ok {
-			continue
+		if n, ok := node.(map[string]interface{}); ok {
+			if workflowSamplerTypes[getStringField(n, "type")] {
+				sampler = n
+				break
+			}
 		}
-		nt := getStringField(n, "type")
-		if nt == "KSampler" || nt == "SamplerCustom" {
-			wv := getMapSliceField(n, "widgets_values")
-			if len(wv) > 0 {
-				if v, ok := toFloat(wv[0]); ok {
-					return formatInt(v)
+	}
+	if sampler == nil {
+		return ""
+	}
+
+	// Check inputs (list format)
+	if inputs := getMapSliceField(sampler, "inputs"); len(inputs) > 0 {
+		for _, inp := range inputs {
+			if m, ok := inp.(map[string]interface{}); ok {
+				if getStringField(m, "name") == "seed" {
+					if link, ok := toFloat(m["link"]); ok {
+						upstream := findSourceNode(nodes, link, map[string]bool{})
+						if upstream != nil {
+							nt := getStringField(upstream, "type")
+							wv := getMapSliceField(upstream, "widgets_values")
+							// FooocusV2Expansion: seed at index 1
+							if nt == "FooocusV2Expansion" && len(wv) > 1 && wv[1] != nil {
+								if v, ok := toFloat(wv[1]); ok {
+									return formatInt(v)
+								}
+							}
+							if len(wv) > 0 && wv[0] != nil {
+								if v, ok := toFloat(wv[0]); ok {
+									return formatInt(v)
+								}
+								if s, ok := wv[0].(string); ok && s != "" {
+									return s
+								}
+							}
+						}
+					}
+					if val, ok := toFloat(m["value"]); ok {
+						return formatInt(val)
+					}
+					if s, ok := m["value"].(string); ok && s != "" {
+						return s
+					}
 				}
 			}
+		}
+	}
+
+	// Fallback: widgets_values
+	if wv := getMapSliceField(sampler, "widgets_values"); len(wv) > 0 && wv[0] != nil {
+		if v, ok := toFloat(wv[0]); ok {
+			return formatInt(v)
 		}
 	}
 	return ""
@@ -638,10 +737,16 @@ func extractSeedFromWorkflow(workflowObj map[string]interface{}) string {
 
 // ── Prompt String Extraction ─────────────────────────────────────────────
 
-func resolvePromptString(promptObj map[string]interface{}, ref interface{}) (string, bool) {
+func resolvePromptString(promptObj map[string]interface{}, ref interface{}, visited map[string]bool) (string, bool) {
 	if ref == nil {
 		return "", false
 	}
+	key := fmt.Sprintf("%p", ref)
+	if visited[key] {
+		return "", false
+	}
+	visited[key] = true
+
 	if s, ok := ref.(string); ok {
 		if trimmed, ok := isPlainPromptString(s); ok {
 			return trimmed, true
@@ -657,13 +762,37 @@ func resolvePromptString(promptObj map[string]interface{}, ref interface{}) (str
 	if arr, ok := ref.([]interface{}); ok && len(arr) > 0 {
 		if nodeID, ok := arr[0].(string); ok {
 			if node, ok := promptObj[nodeID].(map[string]interface{}); ok {
+				ct := getStringField(node, "class_type")
+				if ct == "" {
+					ct = getStringField(node, "type")
+				}
 				inputs := getMapField(node, "inputs")
 				if inputs == nil {
 					return "", false
 				}
+				// Textbox node
+				if ct == "Textbox" {
+					if s, ok := inputs["text"].(string); ok && strings.TrimSpace(s) != "" {
+						return s, true
+					}
+				}
+				// ImpactWildcardProcessor node
+				if ct == "ImpactWildcardProcessor" {
+					for _, field := range []string{"populated_text", "wildcard_text"} {
+						if s, ok := inputs[field].(string); ok && strings.TrimSpace(s) != "" {
+							return s, true
+						}
+					}
+				}
+				// widgets_values fallback
+				if wv := getMapSliceField(node, "widgets_values"); len(wv) > 0 {
+					if s, ok := wv[0].(string); ok && strings.TrimSpace(s) != "" {
+						return s, true
+					}
+				}
 				for _, key := range []string{"text", "prompt"} {
 					if val, exists := inputs[key]; exists {
-						if result, ok := resolvePromptString(promptObj, val); ok {
+						if result, ok := resolvePromptString(promptObj, val, visited); ok {
 							return result, true
 						}
 					}
@@ -689,7 +818,7 @@ func extractPositivePromptFromPrompt(promptObj map[string]interface{}, samplerNo
 		return ""
 	}
 
-	if result, ok := resolvePromptString(promptObj, posInput); ok {
+	if result, ok := resolvePromptString(promptObj, posInput, map[string]bool{}); ok {
 		if isPositivePrompt(result) {
 			return result
 		}
@@ -715,6 +844,10 @@ func extractPromptsHeuristic(promptObj map[string]interface{}) (string, string) 
 		if ct == "" {
 			ct = getStringField(n, "type")
 		}
+		title := ""
+		if meta := getMapField(n, "_meta"); meta != nil {
+			title = getStringField(meta, "title")
+		}
 		inputs := getMapField(n, "inputs")
 		if inputs == nil {
 			continue
@@ -731,37 +864,31 @@ func extractPromptsHeuristic(promptObj map[string]interface{}) (string, string) 
 			if s, ok := val.(string); ok {
 				if trimmed, ok := isPlainPromptString(s); ok {
 					if isPositivePrompt(trimmed) {
-						priority := 0
-						if ct == "CLIPTextEncode" {
-							priority = 2
-						}
-						posCandidates = append(posCandidates, candidate{trimmed, priority})
+						posCandidates = append(posCandidates, candidate{trimmed, calcPriority(ct, title, "positive")})
 					}
 					if isNegativePrompt(trimmed) {
-						priority := 0
-						if ct == "CLIPTextEncode" {
-							priority = 2
-						}
-						negCandidates = append(negCandidates, candidate{trimmed, priority})
+						negCandidates = append(negCandidates, candidate{trimmed, calcPriority(ct, title, "negative")})
 					}
 				}
 			}
 
 			// Resolve through references
-			if result, ok := resolvePromptString(promptObj, val); ok {
+			if result, ok := resolvePromptString(promptObj, val, map[string]bool{}); ok {
 				if isPositivePrompt(result) {
-					priority := 0
-					if ct == "CLIPTextEncode" {
-						priority = 2
+					if ct == "CR Prompt Text" && strings.Contains(strings.ToLower(title), "positive") {
+						if crPositive == "" && strings.TrimSpace(result) != "" {
+							crPositive = result
+						}
 					}
-					posCandidates = append(posCandidates, candidate{result, priority})
+					posCandidates = append(posCandidates, candidate{result, calcPriority(ct, title, "positive")})
 				}
 				if isNegativePrompt(result) {
-					priority := 0
-					if ct == "CLIPTextEncode" {
-						priority = 2
+					if ct == "CR Prompt Text" && strings.Contains(strings.ToLower(title), "negative") {
+						if crNegative == "" && strings.TrimSpace(result) != "" {
+							crNegative = result
+						}
 					}
-					negCandidates = append(negCandidates, candidate{result, priority})
+					negCandidates = append(negCandidates, candidate{result, calcPriority(ct, title, "negative")})
 				}
 			}
 		}
@@ -772,7 +899,6 @@ func extractPromptsHeuristic(promptObj map[string]interface{}) (string, string) 
 	if crPositive != "" {
 		positive = crPositive
 	} else {
-		// Sort by priority descending
 		sortCandidates(posCandidates)
 		if len(posCandidates) > 0 {
 			positive = posCandidates[0].value
@@ -791,6 +917,23 @@ func extractPromptsHeuristic(promptObj map[string]interface{}) (string, string) 
 	return positive, negative
 }
 
+func calcPriority(ct, title, polarity string) int {
+	titleLower := strings.ToLower(title)
+	if ct == "CR Prompt Text" && strings.Contains(titleLower, polarity) {
+		return 10
+	}
+	if ct == "CR Prompt Text" {
+		return 5
+	}
+	if strings.Contains(titleLower, polarity) {
+		return 3
+	}
+	if ct == "CLIPTextEncode" {
+		return 2
+	}
+	return 0
+}
+
 func sortCandidates(c []candidate) {
 	for i := 0; i < len(c); i++ {
 		for j := i + 1; j < len(c); j++ {
@@ -801,48 +944,11 @@ func sortCandidates(c []candidate) {
 	}
 }
 
-// ── Workflow Prompt Extraction ───────────────────────────────────────────
+// ── Workflow Graph Helpers ────────────────────────────────────────────────
 
-func extractPromptsFromWorkflow(workflowObj map[string]interface{}) (string, string) {
-	nodes := getMapSliceField(workflowObj, "nodes")
-	// Find a sampler node and trace its positive/negative inputs
-	for _, node := range nodes {
-		n, ok := node.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		nt := getStringField(n, "type")
-		if nt == "KSampler" || nt == "SamplerCustom" {
-			inputs := getMapSliceField(n, "inputs")
-			var posLinkID, negLinkID float64
-			for _, inp := range inputs {
-				if m, ok := inp.(map[string]interface{}); ok {
-					name := getStringField(m, "name")
-					if name == "positive" {
-						if link, ok := toFloat(m["link"]); ok {
-							posLinkID = link
-						}
-					}
-					if name == "negative" {
-						if link, ok := toFloat(m["link"]); ok {
-							negLinkID = link
-						}
-					}
-				}
-			}
-			positive := resolvePromptFromGraph(nodes, posLinkID)
-			negative := resolvePromptFromGraph(nodes, negLinkID)
-			return positive, negative
-		}
-	}
-	return "", ""
-}
-
-func resolvePromptFromGraph(nodes []interface{}, linkID float64) string {
-	if linkID == 0 {
-		return ""
-	}
-	// Find source node connected to this link
+// findSourceNode traces node output links to find the upstream source node
+// that produces the given link_id. Returns nil if not found.
+func findSourceNode(nodes []interface{}, linkID float64, visited map[string]bool) map[string]interface{} {
 	for _, node := range nodes {
 		n, ok := node.(map[string]interface{})
 		if !ok {
@@ -853,14 +959,77 @@ func resolvePromptFromGraph(nodes []interface{}, linkID float64) string {
 			if m, ok := out.(map[string]interface{}); ok {
 				links := getMapSliceField(m, "links")
 				for _, l := range links {
-					if v, ok := toFloat(l); ok && v == linkID {
-						// Found the source node — extract prompt text
-						wv := getMapSliceField(n, "widgets_values")
-						if len(wv) > 0 {
-							if s, ok := wv[0].(string); ok {
-								if trimmed, ok := isPlainPromptString(s); ok {
-									return trimmed
+					if v, ok := toFloat(l); ok && float64(int(v)) == float64(int(linkID)) {
+						return n
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// resolvePromptFromWorkflowGraph recursively follows node graph to extract prompt text.
+func resolvePromptFromWorkflowGraph(nodes []interface{}, node map[string]interface{}, visited map[string]bool) string {
+	nid := ""
+	if id, ok := node["id"]; ok {
+		nid = fmt.Sprintf("%v", id)
+	}
+	if visited[nid] {
+		return ""
+	}
+	visited[nid] = true
+
+	var found []string
+
+	// Check widgets_values
+	if wv := getMapSliceField(node, "widgets_values"); len(wv) > 0 {
+		if s, ok := wv[0].(string); ok && strings.TrimSpace(s) != "" {
+			if trimmed, ok := isPlainPromptString(s); ok {
+				found = append(found, trimmed)
+			}
+		}
+	}
+
+	// Check inputs (map format)
+	if inputs := getMapField(node, "inputs"); inputs != nil {
+		for _, key := range []string{"text", "prompt"} {
+			if s, ok := inputs[key].(string); ok && strings.TrimSpace(s) != "" {
+				found = append(found, s)
+			}
+		}
+		// Follow reference links
+		for _, key := range []string{"text", "prompt", "positive", "negative"} {
+			val := inputs[key]
+			if arr, ok := val.([]interface{}); ok && len(arr) > 0 {
+				if refID, ok := arr[0].(string); ok {
+					for _, n := range nodes {
+						if ref, ok := n.(map[string]interface{}); ok {
+							if fmt.Sprintf("%v", ref["id"]) == refID {
+								if result := resolvePromptFromWorkflowGraph(nodes, ref, visited); result != "" {
+									found = append(found, result)
 								}
+							}
+						}
+					}
+				}
+			} else if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
+				found = append(found, s)
+			}
+		}
+	}
+
+	// Check inputs (list format) — follow links through findSourceNode
+	if inputsList := getMapSliceField(node, "inputs"); len(inputsList) > 0 {
+		for _, inp := range inputsList {
+			if m, ok := inp.(map[string]interface{}); ok {
+				name := getStringField(m, "name")
+				if name == "text" || name == "prompt" || name == "positive" || name == "negative" {
+					if link, ok := toFloat(m["link"]); ok {
+						upstream := findSourceNode(nodes, link, map[string]bool{})
+						if upstream != nil {
+							if result := resolvePromptFromWorkflowGraph(nodes, upstream, visited); result != "" {
+								found = append(found, result)
 							}
 						}
 					}
@@ -868,7 +1037,82 @@ func resolvePromptFromGraph(nodes []interface{}, linkID float64) string {
 			}
 		}
 	}
+
+	if len(found) > 0 {
+		return found[len(found)-1]
+	}
 	return ""
+}
+
+// ── Workflow Prompt Extraction ───────────────────────────────────────────
+
+func extractPromptsFromWorkflow(workflowObj map[string]interface{}) (string, string) {
+	nodes := getMapSliceField(workflowObj, "nodes")
+	if nodes == nil {
+		return "", ""
+	}
+
+	// Find a sampler node
+	var sampler map[string]interface{}
+	for _, node := range nodes {
+		if n, ok := node.(map[string]interface{}); ok {
+			if workflowSamplerTypes[getStringField(n, "type")] {
+				sampler = n
+				break
+			}
+		}
+	}
+	if sampler == nil {
+		return "", ""
+	}
+
+	inputs := getMapSliceField(sampler, "inputs")
+	if inputs == nil {
+		return "", ""
+	}
+
+	var posInput, negInput map[string]interface{}
+	for _, inp := range inputs {
+		if m, ok := inp.(map[string]interface{}); ok {
+			switch getStringField(m, "name") {
+			case "positive":
+				posInput = m
+			case "negative":
+				negInput = m
+			}
+		}
+	}
+
+	var positive, negative string
+	if posInput != nil {
+		if link, ok := toFloat(posInput["link"]); ok {
+			posNode := findSourceNode(nodes, link, map[string]bool{})
+			if posNode != nil {
+				positive = resolvePromptFromWorkflowGraph(nodes, posNode, map[string]bool{})
+			}
+		}
+	}
+	if negInput != nil {
+		if link, ok := toFloat(negInput["link"]); ok {
+			negNode := findSourceNode(nodes, link, map[string]bool{})
+			if negNode != nil {
+				negative = resolvePromptFromWorkflowGraph(nodes, negNode, map[string]bool{})
+			}
+		}
+	}
+
+	// Dedup: if same, figure out which one to keep
+	if positive != "" && negative != "" && positive == negative {
+		if isNegativePrompt(negative) && !isPositivePrompt(positive) {
+			positive = ""
+		} else if isPositivePrompt(positive) && !isNegativePrompt(negative) {
+			negative = ""
+		} else {
+			negative = ""
+		}
+	}
+
+	return positive, negative
 }
 
 // ── Parameters Extraction ────────────────────────────────────────────────

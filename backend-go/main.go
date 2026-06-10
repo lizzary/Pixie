@@ -55,7 +55,7 @@ func main() {
 	// Determine frontend build path
 	if *frontendDir == "" {
 		// Check packaged layout first (_internal/frontend)
-		packagedFrontend := filepath.Join(baseDir, "_internal", "frontend")
+		packagedFrontend := filepath.Join(baseDir, "frontend")
 		if _, err := os.Stat(packagedFrontend); err == nil {
 			*frontendDir = packagedFrontend
 		} else {
